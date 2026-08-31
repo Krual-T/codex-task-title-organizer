@@ -1,6 +1,6 @@
 ---
 name: organize-codex-task-titles
-description: Standardize, color-code, and safely rename Codex task titles using a domain, project or repository key, work type, and concrete object-plus-purpose summary. Use for current-task title checkpoints, manual title cleanup, cross-repository batch normalization, NO-ID migration, or recurring title maintenance. Private projects without Jira or Gerrit should use the project name, repository name, or cwd basename.
+description: Standardize and safely rename Codex task titles with color-block, semantic-icon, or explicit custom markers plus a domain, project or repository key, work type, and concrete object-plus-purpose summary. Use for current-task title checkpoints, manual title cleanup, cross-repository batch normalization, marker migration, NO-ID migration, or recurring title maintenance. Private projects without Jira or Gerrit should use the project name, repository name, or cwd basename.
 ---
 
 # Organize Codex task titles
@@ -9,10 +9,18 @@ description: Standardize, color-code, and safely rename Codex task titles using 
 
 Use this structure:
 
-`Colored emoji Domain｜Project/repository key｜Work type｜Concrete object: purpose or symptom`
+`Marker Domain｜Project/repository key｜Work type｜Concrete object: purpose or symptom`
 
-Match the language already used in the task. Put exactly one same-sized colored
-square at the beginning:
+Match the language already used in the task. Select the marker style in this
+order:
+
+1. an explicit instruction for the current operation;
+2. the active project's instructions, such as `AGENTS.md`;
+3. an already valid color-block, semantic-icon, or custom style;
+4. color blocks for a new or noncompliant title.
+
+Put exactly one leading marker grapheme followed by one ordinary space. Never
+combine styles. Color blocks are the default:
 
 - `🟥`: analysis or diagnosis
 - `🟦`: fix or implementation
@@ -22,9 +30,10 @@ square at the beginning:
 - `🟨`: documentation or reporting
 - `🟫`: environment, tooling, or automation
 
-Choose the color from the primary outcome. For mixed work, use at most two work
-types, such as `Fix + Validate`. Do not combine Emoji or use them for severity,
-success, or urgency.
+Choose the marker from the primary outcome. For mixed work, use at most two work
+types, such as `Fix + Validate`. Do not use markers for severity, success, or
+urgency. For the semantic-icon mapping and custom marker constraints, read
+[references/title-styles.md](references/title-styles.md).
 
 Fill the fields as follows:
 
@@ -63,8 +72,9 @@ the task has not established.
 
 Treat user instructions and the active project's `AGENTS.md` as a local overlay.
 It may define domain aliases, repository abbreviations, issue-key formats,
-preferred work-type wording, or a timezone. Do not copy private taxonomies into
-public files unless the user explicitly asks.
+preferred work-type wording, a marker style, a custom marker mapping, or a
+timezone. Do not copy private taxonomies into public files unless the user
+explicitly asks.
 
 Never infer a client identity, project name, or issue key from unrelated tasks.
 
@@ -111,11 +121,11 @@ unless the user explicitly requests that broader scope.
 5. Infer a title from the existing title, summary, project context, and only the
    basename of `cwd`. Read a few recent turns only when the object or purpose is
    still unclear.
-6. Treat a title as needing work when it lacks the colored square, has incomplete
-   fields, uses a placeholder key, distinguishes duplicates with a numeric
-   suffix, or omits the concrete object or purpose.
+6. Treat a title as needing work when it lacks the selected leading marker, has
+   incomplete fields, uses a placeholder key, distinguishes duplicates with a
+   numeric suffix, or omits the concrete object or purpose.
 7. Do not rewrite already compliant titles. If the user asks only for an icon
-   migration, change only the icon.
+   or marker migration, change only the leading marker and preserve all fields.
 8. Modify at most 10 tasks per batch. Split larger requests into batches and
    re-list after each batch.
 9. Count success only when the title tool returns the target and new title. On

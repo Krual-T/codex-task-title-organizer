@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Keep color blocks as the default and add semantic-icon and explicit custom
+  marker styles.
+- Preserve compliant title fields during marker-only migrations.
+- Let explicit requests and project instructions select a marker style without
+  expanding Hook state or weakening privacy boundaries.
+
 ## 0.3.0+codex.20260831144036
 
 - Change the default Hook schedule from `4,10` to `2,4,10`.

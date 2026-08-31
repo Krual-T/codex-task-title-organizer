@@ -13,7 +13,35 @@ The plugin bundles one skill and one privacy-conscious `UserPromptSubmit` Hook:
 
 ## Title standard
 
-`Colored emoji Domain｜Project/repository key｜Work type｜Concrete object: purpose or symptom`
+`Marker Domain｜Project/repository key｜Work type｜Concrete object: purpose or symptom`
+
+Color blocks remain the default, while semantic icons and explicit custom
+markers are supported:
+
+| Primary outcome | Color blocks (default) | Semantic icons |
+| --- | --- | --- |
+| Analysis or diagnosis | `🟥` | `🔎` |
+| Fix or implementation | `🟦` | `🔧` |
+| Validation or testing | `🟩` | `🧪` |
+| Delivery or synchronization | `🟪` | `📦` |
+| Review | `🟧` | `👀` |
+| Documentation or reporting | `🟨` | `📝` |
+| Environment, tooling, or automation | `🟫` | `⚙️` |
+
+Use exactly one leading marker. A project may define one custom marker or a
+complete category mapping in `AGENTS.md`; explicit instructions for the current
+operation take precedence. Invalid or incomplete custom mappings fall back to
+color blocks at automatic checkpoints.
+
+## Sidebar examples
+
+Color blocks (default):
+
+![Color-block title examples](docs/assets/title-organizer-sidebar-examples-en-color-blocks.png)
+
+Semantic icons:
+
+![Semantic-icon title examples](docs/assets/title-organizer-sidebar-examples-en-semantic-icons.png)
 
 For private projects without Jira or Gerrit, the second field uses the project
 name, repository name, or only the `cwd` basename. It never generates `NO-ID`.
@@ -88,6 +116,11 @@ Use $organize-codex-task-titles to standardize the current Codex task title.
 ```text
 Use $organize-codex-task-titles to normalize recent Codex task titles, changing
 at most 10 and skipping active and ChatGPT tasks.
+```
+
+```text
+Use $organize-codex-task-titles to migrate recent compliant titles to semantic
+icons, changing only the leading marker.
 ```
 
 ## Develop and verify

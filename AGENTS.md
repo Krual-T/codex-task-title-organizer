@@ -15,6 +15,9 @@ marketplace entry.
 - Preserve the package ID `codex-task-title-organizer` for upgrade compatibility.
 - Keep the default checkpoints at `2,4,10`; configuration must remain bounded,
   fail-open, and non-replaying when a schedule changes mid-session.
+- Keep color blocks as the default marker style. Semantic icons or custom
+  markers require an explicit request or project instruction, and titles use
+  exactly one leading marker.
 - Run the unit tests on every Hook, manifest, marketplace, or skill change.
 
 ## Installation

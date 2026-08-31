@@ -1,7 +1,7 @@
 {
   "name": "codex-task-title-organizer",
-  "version": "0.3.0+codex.20260831144036",
-  "description": "Keep current and recent Codex task titles concise, project-aware, and privacy-conscious.",
+  "version": "0.4.0",
+  "description": "Keep Codex task titles concise, project-aware, privacy-conscious, and visually customizable.",
   "author": {
     "name": "znbsf",
     "url": "https://github.com/znbsf"
@@ -17,8 +17,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Task Title Organizer",
-    "shortDescription": "Project-aware Codex titles at useful checkpoints",
-    "longDescription": "Bundles a title-standardization skill with a configurable, privacy-conscious UserPromptSubmit hook. The default schedule establishes a title at prompt 2, refines it at prompt 4, and refreshes it at prompt 10 only when the work changed materially.",
+    "shortDescription": "Project-aware titles with selectable marker styles",
+    "longDescription": "Bundles a title-standardization skill with color-block, semantic-icon, and custom marker styles plus a configurable, privacy-conscious UserPromptSubmit hook. The default schedule establishes a title at prompt 2, refines it at prompt 4, and refreshes it at prompt 10 only when the work changed materially.",
     "developerName": "znbsf",
     "category": "Productivity",
     "capabilities": [
@@ -29,7 +29,7 @@
     "defaultPrompt": [
       "Standardize the current Codex task title.",
       "Review and normalize my recent Codex task titles.",
-      "Explain how the title checkpoint hook works."
+      "Switch my recent compliant task titles to semantic icons."
     ],
     "brandColor": "#2563EB"
   }

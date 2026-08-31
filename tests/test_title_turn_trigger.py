@@ -20,6 +20,7 @@ PLUGIN_MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 SKILL = PLUGIN_ROOT / "skills" / "organize-codex-task-titles" / "SKILL.md"
 CONFIG_REFERENCE = SKILL.parent / "references" / "configuration.md"
+STYLE_REFERENCE = SKILL.parent / "references" / "title-styles.md"
 CHECKPOINT_ENV = "CODEX_TASK_TITLE_CHECKPOINTS"
 
 
@@ -110,6 +111,10 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertIn("user prompt 2", first_context)
             self.assertIn("initial checkpoint", first_context)
             self.assertIn("configured schedule 2,4,10", first_context)
+            self.assertIn(
+                "preserve an already valid existing marker style",
+                first_context,
+            )
             self.assertEqual(run_hook(data_dir, prompt_payload(2)), "")
 
             self.assertEqual(run_hook(data_dir, prompt_payload(3)), "")
@@ -408,6 +413,8 @@ class TitleTurnTriggerTests(unittest.TestCase):
         hooks = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
 
         self.assertEqual(plugin["name"], "codex-task-title-organizer")
+        self.assertEqual(plugin["version"].split("+", 1)[0], "0.4.0")
+        self.assertLessEqual(len(plugin["interface"]["defaultPrompt"]), 3)
         self.assertNotIn("hooks", plugin)
         self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit"})
         self.assertIn("2, 4, and 10", hooks["description"])
@@ -421,6 +428,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
     def test_skill_and_configuration_reference(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         config_text = CONFIG_REFERENCE.read_text(encoding="utf-8")
+        style_text = STYLE_REFERENCE.read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\nname: organize-codex-task-titles\n"))
         self.assertIn(
             "project name, repository name, or only the basename",
@@ -428,9 +436,14 @@ class TitleTurnTriggerTests(unittest.TestCase):
         )
         self.assertIn("Modify at most 10 tasks per batch", text)
         self.assertIn("references/configuration.md", text)
+        self.assertIn("references/title-styles.md", text)
         self.assertIn("task-title-organizer.json", config_text)
         self.assertIn("default", config_text)
         self.assertIn("2,4,10", config_text)
+        self.assertIn("Color blocks (default)", style_text)
+        self.assertIn("Semantic icons", style_text)
+        self.assertIn("Custom styles", style_text)
+        self.assertIn("exactly one leading marker", style_text)
 
     def test_public_files_avoid_obvious_sensitive_data(self) -> None:
         patterns = {
