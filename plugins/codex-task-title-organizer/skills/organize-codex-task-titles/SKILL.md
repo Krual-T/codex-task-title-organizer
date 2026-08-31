@@ -1,0 +1,143 @@
+---
+name: organize-codex-task-titles
+description: Standardize, color-code, and safely rename Codex task titles using a domain, project or repository key, work type, and concrete object-plus-purpose summary. Use for current-task title checkpoints, manual title cleanup, cross-repository batch normalization, NO-ID migration, or recurring title maintenance. Private projects without Jira or Gerrit should use the project name, repository name, or cwd basename.
+---
+
+# Organize Codex task titles
+
+## Build the title
+
+Use this structure:
+
+`Colored emoji Domain｜Project/repository key｜Work type｜Concrete object: purpose or symptom`
+
+Match the language already used in the task. Put exactly one same-sized colored
+square at the beginning:
+
+- `🟥`: analysis or diagnosis
+- `🟦`: fix or implementation
+- `🟩`: validation or testing
+- `🟪`: delivery or synchronization
+- `🟧`: review
+- `🟨`: documentation or reporting
+- `🟫`: environment, tooling, or automation
+
+Choose the color from the primary outcome. For mixed work, use at most two work
+types, such as `Fix + Validate`. Do not combine Emoji or use them for severity,
+success, or urgency.
+
+Fill the fields as follows:
+
+- **Domain:** use a stable, short product, component, or workstream label such as
+  `Android`, `Runtime`, `Infra`, `Docs`, or `Codex`. Prefer terminology already
+  established by the user or project.
+- **Project/repository key:** always identify where the work belongs. Prefer a
+  known project or repository name. A Jira, Gerrit, issue, pull request, change,
+  or release key may be appended when it is already established, for example
+  `service-api#APP-123` or `player#PR-456`. For private projects without such a
+  key, use the project name, repository name, or only the basename of `cwd`.
+  Never invent an identifier and never emit placeholders such as `NO-ID`. Use a
+  local `MMDD` activity date only when no stable project or repository context
+  exists at all.
+- **Work type:** use a concise action label in the task's language, for example
+  Analyze, Diagnose, Fix, Build, Review, Validate, Deliver, Sync, Document,
+  Report, Environment, Tooling, or Automate.
+- **Concrete object and purpose:** answer both “what is being handled?” and “why
+  or what symptom?”. Preserve the concrete feature, component, failure, or
+  intended behavior.
+
+Shape the last field around the work:
+
+- analysis/diagnosis: `Object: symptom or unknown cause`
+- fix/build: `Change point: intended behavior`
+- validation: `Changed behavior: validation target`
+- review: `Change: risk or requirement`
+- docs/tooling/automation: `Artifact or trigger: intended use`
+
+Avoid vague endings such as “implementation”, “behavior”, “content”, “update”,
+“optimization”, “test”, or “issue” without a concrete object and purpose. Keep
+the title to one readable sidebar line. Do not claim success or validation that
+the task has not established.
+
+## Respect local customization
+
+Treat user instructions and the active project's `AGENTS.md` as a local overlay.
+It may define domain aliases, repository abbreviations, issue-key formats,
+preferred work-type wording, or a timezone. Do not copy private taxonomies into
+public files unless the user explicitly asks.
+
+Never infer a client identity, project name, or issue key from unrelated tasks.
+
+## Current-task checkpoint mode
+
+When developer context identifies a plugin checkpoint, finish the user's main
+request first, then run this section before ending the same foreground turn. Do
+not enter the batch workflow:
+
+1. Generate the title only from the current task context. Do not call
+   `list_threads`, `read_thread`, or an automation tool.
+2. The current task may be active. Call `set_thread_title` without a `threadId`
+   so only the calling task is targeted.
+3. Prefer the current project/repository identifier or `cwd` basename over an
+   activity date when no Jira/Gerrit key exists.
+4. At a later checkpoint, rename only when the current object or purpose changed
+   materially; otherwise skip.
+5. Act only on a confirmed Codex task. If task kind or tool availability cannot
+   be confirmed, skip quietly. Do not create a task, send a follow-up, inspect
+   internal files, or use UI automation as a workaround.
+6. Treat title maintenance as secondary. Do not add a maintenance report unless
+   a failure affects the user's decision.
+
+## Batch workflow
+
+1. Locate the Codex task tools `list_threads`, `read_thread`, and
+   `set_thread_title`. Use the automation tool only when the user explicitly
+   requests recurring maintenance.
+2. List recent tasks and inspect both pinned and ordinary results within the
+   tool's request limit. Follow supported pagination when more results exist.
+3. Modify only `kind=codex`. Count but do not rename `kind=chatgpt` entries.
+4. Skip active tasks unless the user explicitly includes the current task or a
+   named active task.
+5. Infer a title from the existing title, summary, project context, and only the
+   basename of `cwd`. Read a few recent turns only when the object or purpose is
+   still unclear.
+6. Treat a title as needing work when it lacks the colored square, has incomplete
+   fields, uses a placeholder key, distinguishes duplicates with a numeric
+   suffix, or omits the concrete object or purpose.
+7. Do not rewrite already compliant titles. If the user asks only for an icon
+   migration, change only the icon.
+8. Modify at most 10 tasks per batch. Split larger requests into batches and
+   re-list after each batch.
+9. Count success only when the title tool returns the target and new title. On
+   `No Codex thread found`, `no rollout found`, timeout, or empty response, stop
+   writes for that target and report the failure. Never bypass task tools with
+   databases, session/rollout files, or UI automation.
+10. Re-list the affected scope and report scanned, changed, failed, and skipped
+    counts plus representative before/after examples.
+
+## Privacy and safety
+
+- Use only metadata appropriate for display in the user's task list.
+- Never place credentials, prompt excerpts, personal names, email addresses,
+  full local paths, private hostnames, or private URLs in a title.
+- Use a neutral component alias or activity date when project visibility is
+  uncertain.
+- Preserve clear existing meaning and do not guess identifiers, intent, or
+  validation results.
+- Do not archive, delete, pin/unpin, create, or follow up on tasks unless the
+  user explicitly asks.
+- Do not edit workspace files or inspect Codex SQLite, session indexes,
+  transcripts, or rollout files as substitutes for task tools.
+- If a required task tool is unavailable, stop title writes and name the missing
+  capability.
+
+## Recurring maintenance
+
+The plugin Hook covers only the current active task at its checkpoints. It does
+not retroactively rename old tasks.
+
+When the user explicitly asks for recurring batch cleanup, prefer updating an
+existing automation instead of creating a duplicate. Preserve its schedule,
+status, notification policy, and target unless the user requests a change.
+Each scheduled batch must still obey the 10-task limit and all task-tool safety
+rules above.

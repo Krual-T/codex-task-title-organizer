@@ -1,0 +1,17 @@
+{
+  "description": "Request privacy-conscious current-task title maintenance at prompt checkpoints 4 and 10.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import os,runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'scripts','title_turn_trigger.py'),run_name='__main__')\"",
+            "commandWindows": "py -3 -c \"import os,runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'scripts','title_turn_trigger.py'),run_name='__main__')\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

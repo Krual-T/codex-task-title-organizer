@@ -1,0 +1,4 @@
+interface:
+  display_name: "Organize Codex task titles"
+  short_description: "Project-aware, privacy-conscious Codex task titles"
+  default_prompt: "Use $organize-codex-task-titles to standardize my recent Codex task titles."

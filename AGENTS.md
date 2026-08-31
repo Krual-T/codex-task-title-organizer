@@ -1,0 +1,26 @@
+# Repository instructions
+
+This repository contains one distributable Codex plugin and its local
+marketplace entry.
+
+## Development
+
+- Keep the public package domain-neutral and privacy-conscious.
+- Private projects without Jira or Gerrit must fall back to a project name,
+  repository name, or `cwd` basename; never generate a placeholder identifier.
+- The Hook may persist only hashed session/turn identifiers and small counters.
+  It must not read or persist prompt text, transcripts, rollouts, databases, or
+  full paths.
+- Keep current-task Hook behavior separate from cross-task batch maintenance.
+- Preserve the package ID `codex-task-title-organizer` for upgrade compatibility.
+- Run the unit tests on every Hook, manifest, marketplace, or skill change.
+
+## Installation
+
+Do not install anything merely because this repository was opened. When the user
+explicitly asks to install it, read `INSTALL.md`, inspect both manifests and the
+Hook command, verify Python 3, then use the supported plugin CLI.
+
+Never bypass the required user review and trust step for a command Hook. Do not
+edit Codex databases, session indexes, transcripts, or rollout files as an
+installation shortcut.

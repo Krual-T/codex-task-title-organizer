@@ -1,0 +1,36 @@
+{
+  "name": "codex-task-title-organizer",
+  "version": "0.3.0",
+  "description": "Keep current and recent Codex task titles concise, project-aware, and privacy-conscious.",
+  "author": {
+    "name": "znbsf",
+    "url": "https://github.com/znbsf"
+  },
+  "homepage": "https://github.com/znbsf/codex-task-title-organizer#readme",
+  "repository": "https://github.com/znbsf/codex-task-title-organizer",
+  "keywords": [
+    "codex",
+    "task-title",
+    "automation",
+    "hooks"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Task Title Organizer",
+    "shortDescription": "Project-aware Codex titles at useful checkpoints",
+    "longDescription": "Bundles a title-standardization skill with a privacy-conscious UserPromptSubmit hook. The hook asks the active Codex turn to set a useful title at prompt 4 and refresh it at prompt 10 only when the work changed materially.",
+    "developerName": "znbsf",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/znbsf/codex-task-title-organizer",
+    "defaultPrompt": [
+      "Standardize the current Codex task title.",
+      "Review and normalize my recent Codex task titles.",
+      "Explain how the title checkpoint hook works."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
