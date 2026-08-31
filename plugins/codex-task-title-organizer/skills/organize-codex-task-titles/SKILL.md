@@ -80,13 +80,23 @@ not enter the batch workflow:
    so only the calling task is targeted.
 3. Prefer the current project/repository identifier or `cwd` basename over an
    activity date when no Jira/Gerrit key exists.
-4. At a later checkpoint, rename only when the current object or purpose changed
-   materially; otherwise skip.
+4. At the first checkpoint, establish a useful title. At an intermediate
+   checkpoint, refine only when the title is missing, inaccurate, or materially
+   clearer context is now available. At the final checkpoint, rename only when
+   the project, work type, object, or purpose changed materially.
 5. Act only on a confirmed Codex task. If task kind or tool availability cannot
    be confirmed, skip quietly. Do not create a task, send a follow-up, inspect
    internal files, or use UI automation as a workaround.
 6. Treat title maintenance as secondary. Do not add a maintenance report unless
    a failure affects the user's decision.
+
+## Configure Hook checkpoints
+
+The default schedule is `2, 4, 10`. When the user explicitly asks to change or
+disable checkpoints, read [references/configuration.md](references/configuration.md)
+and use the narrowest requested scope. Prefer a project-level configuration for
+one repository. Do not change a user environment variable or plugin-global data
+unless the user explicitly requests that broader scope.
 
 ## Batch workflow
 

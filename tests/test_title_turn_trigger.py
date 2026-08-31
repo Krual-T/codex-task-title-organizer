@@ -19,11 +19,20 @@ HOOKS_CONFIG = PLUGIN_ROOT / "hooks" / "hooks.json"
 PLUGIN_MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 SKILL = PLUGIN_ROOT / "skills" / "organize-codex-task-titles" / "SKILL.md"
+CONFIG_REFERENCE = SKILL.parent / "references" / "configuration.md"
+CHECKPOINT_ENV = "CODEX_TASK_TITLE_CHECKPOINTS"
 
 
-def run_hook(data_dir: str, payload: dict[str, object]) -> str:
+def run_hook(
+    data_dir: str,
+    payload: dict[str, object],
+    extra_env: dict[str, str] | None = None,
+) -> str:
     env = os.environ.copy()
+    env.pop(CHECKPOINT_ENV, None)
     env["PLUGIN_DATA"] = data_dir
+    if extra_env:
+        env.update(extra_env)
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
         input=json.dumps(payload),
@@ -35,14 +44,33 @@ def run_hook(data_dir: str, payload: dict[str, object]) -> str:
     return result.stdout.strip()
 
 
-def prompt_payload(number: int, prompt: str = "secret prompt") -> dict[str, object]:
+def prompt_payload(
+    number: int,
+    prompt: str = "secret prompt",
+    *,
+    session_id: str = "thr-test",
+    cwd: str | None = None,
+) -> dict[str, object]:
     return {
-        "session_id": "thr-test",
-        "turn_id": f"turn-{number}",
-        "cwd": "workspace/project-alpha",
+        "session_id": session_id,
+        "turn_id": f"{session_id}-turn-{number}",
+        "cwd": cwd or str(REPO_ROOT),
         "hook_event_name": "UserPromptSubmit",
         "prompt": prompt,
     }
+
+
+def state_path_for(data_dir: str, session_id: str = "thr-test") -> Path:
+    session_key = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return Path(data_dir) / f"{session_key}.json"
+
+
+def write_project_config(project_root: str, payload: dict[str, object]) -> None:
+    config_dir = Path(project_root) / ".codex"
+    config_dir.mkdir()
+    (config_dir / "task-title-organizer.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
 
 class TitleTurnTriggerTests(unittest.TestCase):
@@ -52,10 +80,11 @@ class TitleTurnTriggerTests(unittest.TestCase):
         command = handler["commandWindows"] if os.name == "nt" else handler["command"]
         with tempfile.TemporaryDirectory() as data_dir:
             env = os.environ.copy()
+            env.pop(CHECKPOINT_ENV, None)
             env["PLUGIN_ROOT"] = str(PLUGIN_ROOT)
             env["PLUGIN_DATA"] = data_dir
             output = ""
-            for number in range(1, 5):
+            for number in range(1, 3):
                 result = subprocess.run(
                     command,
                     input=json.dumps(prompt_payload(number)),
@@ -67,56 +96,188 @@ class TitleTurnTriggerTests(unittest.TestCase):
                 )
                 output = result.stdout.strip()
             parsed = json.loads(output)
-            self.assertIn("user prompt 4", parsed["hookSpecificOutput"]["additionalContext"])
+            self.assertIn(
+                "user prompt 2",
+                parsed["hookSpecificOutput"]["additionalContext"],
+            )
 
-    def test_thresholds_deduplication_and_content_privacy(self) -> None:
+    def test_default_thresholds_deduplication_and_content_privacy(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
-            for number in range(1, 4):
-                self.assertEqual(run_hook(data_dir, prompt_payload(number)), "")
+            self.assertEqual(run_hook(data_dir, prompt_payload(1)), "")
 
-            first = json.loads(run_hook(data_dir, prompt_payload(4)))
+            first = json.loads(run_hook(data_dir, prompt_payload(2)))
             first_context = first["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("user prompt 4", first_context)
-            self.assertIn("Current-task checkpoint mode", first_context)
-            self.assertIn("project name, repository name, or cwd basename", first_context)
-            self.assertEqual(run_hook(data_dir, prompt_payload(4)), "")
+            self.assertIn("user prompt 2", first_context)
+            self.assertIn("initial checkpoint", first_context)
+            self.assertIn("configured schedule 2,4,10", first_context)
+            self.assertEqual(run_hook(data_dir, prompt_payload(2)), "")
+
+            self.assertEqual(run_hook(data_dir, prompt_payload(3)), "")
+            second = json.loads(run_hook(data_dir, prompt_payload(4)))
+            second_context = second["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("refinement checkpoint", second_context)
+            self.assertIn("materially more clearly", second_context)
 
             for number in range(5, 10):
                 self.assertEqual(run_hook(data_dir, prompt_payload(number)), "")
 
-            second = json.loads(run_hook(data_dir, prompt_payload(10)))
-            second_context = second["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("refresh checkpoint", second_context)
-            self.assertIn("changed materially", second_context)
-            for number in range(11, 14):
-                self.assertEqual(run_hook(data_dir, prompt_payload(number)), "")
+            third = json.loads(run_hook(data_dir, prompt_payload(10)))
+            third_context = third["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("final refresh checkpoint", third_context)
+            self.assertIn("changed materially", third_context)
+            self.assertEqual(run_hook(data_dir, prompt_payload(11)), "")
 
-            state_paths = list(Path(data_dir).glob("*.json"))
-            self.assertEqual(len(state_paths), 1)
-            state_text = state_paths[0].read_text(encoding="utf-8")
+            state_text = state_path_for(data_dir).read_text(encoding="utf-8")
             state = json.loads(state_text)
             self.assertEqual(
                 set(state),
-                {"schema_version", "prompt_count", "seen_turns", "fired_thresholds"},
+                {
+                    "schema_version",
+                    "prompt_count",
+                    "seen_turns",
+                    "fired_thresholds",
+                    "checkpoint_signature",
+                },
             )
-            self.assertEqual(state["schema_version"], 3)
+            self.assertEqual(state["schema_version"], 4)
+            self.assertEqual(state["checkpoint_signature"], [2, 4, 10])
+            self.assertEqual(state["fired_thresholds"], [2, 4, 10])
             self.assertNotIn("secret prompt", state_text)
             self.assertNotIn("thr-test", state_text)
-            self.assertNotIn("turn-4", state_text)
+            self.assertNotIn("turn-2", state_text)
+            self.assertNotIn(str(REPO_ROOT), state_text)
 
-    def test_migrates_v2_state_without_replaying_checkpoint(self) -> None:
+    def test_environment_configuration(self) -> None:
+        custom_env = {CHECKPOINT_ENV: "1,3,5"}
         with tempfile.TemporaryDirectory() as data_dir:
-            session_key = hashlib.sha256(b"thr-test").hexdigest()
-            state_path = Path(data_dir) / f"{session_key}.json"
+            first = json.loads(
+                run_hook(data_dir, prompt_payload(1), custom_env)
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("initial checkpoint", first)
+            self.assertIn("configured schedule 1,3,5", first)
+            self.assertIn("source environment", first)
+            self.assertEqual(run_hook(data_dir, prompt_payload(2), custom_env), "")
+            middle = json.loads(
+                run_hook(data_dir, prompt_payload(3), custom_env)
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("refinement checkpoint", middle)
+            self.assertEqual(run_hook(data_dir, prompt_payload(4), custom_env), "")
+            final = json.loads(
+                run_hook(data_dir, prompt_payload(5), custom_env)
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("final refresh checkpoint", final)
+
+    def test_project_configuration_overrides_environment(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root, {"enabled": True, "checkpoints": [2, 6]}
+            )
+            custom_env = {CHECKPOINT_ENV: "1,3"}
+            self.assertEqual(
+                run_hook(
+                    data_dir,
+                    prompt_payload(1, cwd=project_root),
+                    custom_env,
+                ),
+                "",
+            )
+            first = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(2, cwd=project_root),
+                    custom_env,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("configured schedule 2,6", first)
+            self.assertIn("source project", first)
+            for number in range(3, 6):
+                self.assertEqual(
+                    run_hook(
+                        data_dir,
+                        prompt_payload(number, cwd=project_root),
+                        custom_env,
+                    ),
+                    "",
+                )
+            final = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(6, cwd=project_root),
+                    custom_env,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("final refresh checkpoint", final)
+
+    def test_plugin_data_configuration_and_project_disable(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            (Path(data_dir) / "config.json").write_text(
+                json.dumps({"enabled": True, "checkpoints": [1, 2]}),
+                encoding="utf-8",
+            )
+            first = json.loads(run_hook(data_dir, prompt_payload(1)))[
+                "hookSpecificOutput"
+            ]["additionalContext"]
+            self.assertIn("source plugin-data", first)
+            final = json.loads(run_hook(data_dir, prompt_payload(2)))[
+                "hookSpecificOutput"
+            ]["additionalContext"]
+            self.assertIn("final refresh checkpoint", final)
+
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(project_root, {"enabled": False})
+            self.assertEqual(
+                run_hook(data_dir, prompt_payload(1, cwd=project_root)),
+                "",
+            )
+            self.assertEqual(list(Path(data_dir).iterdir()), [])
+
+    def test_invalid_project_config_falls_through_to_environment(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root, {"enabled": True, "checkpoints": [2, 2]}
+            )
+            custom_env = {CHECKPOINT_ENV: "3,7"}
+            for number in range(1, 3):
+                self.assertEqual(
+                    run_hook(
+                        data_dir,
+                        prompt_payload(number, cwd=project_root),
+                        custom_env,
+                    ),
+                    "",
+                )
+            output = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(3, cwd=project_root),
+                    custom_env,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("source environment", output)
+            self.assertIn("configured schedule 3,7", output)
+
+    def test_migrates_v2_and_v3_state_without_replaying_past_checkpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            state_path = state_path_for(data_dir)
             state_path.write_text(
                 json.dumps(
                     {
                         "schema_version": 2,
                         "prompt_count": 6,
-                        "seen_turns": [hashlib.sha256(b"turn-6").hexdigest()],
+                        "seen_turns": [
+                            hashlib.sha256(b"thr-test-turn-6").hexdigest()
+                        ],
                         "fired_thresholds": [4],
                         "successful_updates": 0,
-                        "pending_turn": hashlib.sha256(b"turn-4").hexdigest(),
                         "pending_threshold": 4,
                     }
                 ),
@@ -125,34 +286,93 @@ class TitleTurnTriggerTests(unittest.TestCase):
 
             self.assertEqual(run_hook(data_dir, prompt_payload(7)), "")
             migrated = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schema_version"], 3)
+            self.assertEqual(migrated["schema_version"], 4)
             self.assertEqual(migrated["prompt_count"], 7)
-            self.assertEqual(migrated["fired_thresholds"], [4])
+            self.assertEqual(migrated["checkpoint_signature"], [2, 4, 10])
+            self.assertEqual(migrated["fired_thresholds"], [2, 4])
             self.assertNotIn("successful_updates", migrated)
 
             self.assertEqual(run_hook(data_dir, prompt_payload(8)), "")
             self.assertEqual(run_hook(data_dir, prompt_payload(9)), "")
             refresh = json.loads(run_hook(data_dir, prompt_payload(10)))
-            self.assertIn("refresh checkpoint", refresh["hookSpecificOutput"]["additionalContext"])
+            self.assertIn(
+                "final refresh checkpoint",
+                refresh["hookSpecificOutput"]["additionalContext"],
+            )
+
+        with tempfile.TemporaryDirectory() as data_dir:
+            state_path = state_path_for(data_dir)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 3,
+                        "prompt_count": 3,
+                        "seen_turns": [],
+                        "fired_thresholds": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            refinement = json.loads(run_hook(data_dir, prompt_payload(4)))
+            self.assertIn(
+                "refinement checkpoint",
+                refinement["hookSpecificOutput"]["additionalContext"],
+            )
+            migrated = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["fired_thresholds"], [2, 4])
+
+    def test_schedule_change_does_not_replay_past_checkpoints(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            for number in range(1, 6):
+                run_hook(data_dir, prompt_payload(number, cwd=project_root))
+
+            write_project_config(
+                project_root, {"enabled": True, "checkpoints": [1, 3, 8]}
+            )
+            self.assertEqual(
+                run_hook(data_dir, prompt_payload(6, cwd=project_root)),
+                "",
+            )
+            self.assertEqual(
+                run_hook(data_dir, prompt_payload(7, cwd=project_root)),
+                "",
+            )
+            output = json.loads(
+                run_hook(data_dir, prompt_payload(8, cwd=project_root))
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("configured schedule 1,3,8", output)
+            self.assertIn("final refresh checkpoint", output)
+
+            state = json.loads(state_path_for(data_dir).read_text(encoding="utf-8"))
+            self.assertEqual(state["checkpoint_signature"], [1, 3, 8])
+            self.assertEqual(state["fired_thresholds"], [1, 2, 3, 4, 8])
 
     def test_corrupt_and_wrong_shaped_state_fail_open(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
-            session_key = hashlib.sha256(b"thr-test").hexdigest()
-            state_path = Path(data_dir) / f"{session_key}.json"
+            state_path = state_path_for(data_dir)
             state_path.write_text("{broken", encoding="utf-8")
             self.assertEqual(run_hook(data_dir, prompt_payload(1)), "")
             state_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": 3,
+                        "schema_version": 4,
                         "prompt_count": "bad",
                         "seen_turns": "not-a-list",
                         "fired_thresholds": {"bad": True},
+                        "checkpoint_signature": "bad",
                     }
                 ),
                 encoding="utf-8",
             )
             self.assertEqual(run_hook(data_dir, prompt_payload(2)), "")
+            output = json.loads(run_hook(data_dir, prompt_payload(3)))
+            self.assertIn(
+                "initial checkpoint",
+                output["hookSpecificOutput"]["additionalContext"],
+            )
 
     def test_non_prompt_events_do_not_create_state(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
@@ -175,11 +395,12 @@ class TitleTurnTriggerTests(unittest.TestCase):
                 for output in outputs
                 if output
             ]
-            self.assertEqual(len(contexts), 2)
-            state_path = next(Path(data_dir).glob("*.json"))
-            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(contexts), 3)
+            state = json.loads(
+                state_path_for(data_dir).read_text(encoding="utf-8")
+            )
             self.assertEqual(state["prompt_count"], 16)
-            self.assertEqual(state["fired_thresholds"], [4, 10])
+            self.assertEqual(state["fired_thresholds"], [2, 4, 10])
 
     def test_package_manifests_and_hook_layout(self) -> None:
         plugin = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
@@ -189,6 +410,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
         self.assertEqual(plugin["name"], "codex-task-title-organizer")
         self.assertNotIn("hooks", plugin)
         self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit"})
+        self.assertIn("2, 4, and 10", hooks["description"])
         self.assertEqual(marketplace["name"], "codex-task-title-organizer")
         entry = marketplace["plugins"][0]
         self.assertEqual(entry["name"], plugin["name"])
@@ -196,12 +418,19 @@ class TitleTurnTriggerTests(unittest.TestCase):
         self.assertEqual(source, PLUGIN_ROOT.resolve())
         self.assertTrue((source / ".codex-plugin" / "plugin.json").is_file())
 
-    def test_skill_frontmatter_and_private_project_fallback(self) -> None:
+    def test_skill_and_configuration_reference(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
+        config_text = CONFIG_REFERENCE.read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\nname: organize-codex-task-titles\n"))
-        self.assertIn("project name, repository name, or only the basename of `cwd`", text)
-        self.assertIn("Never invent an identifier", text)
+        self.assertIn(
+            "project name, repository name, or only the basename",
+            text,
+        )
         self.assertIn("Modify at most 10 tasks per batch", text)
+        self.assertIn("references/configuration.md", text)
+        self.assertIn("task-title-organizer.json", config_text)
+        self.assertIn("default", config_text)
+        self.assertIn("2,4,10", config_text)
 
     def test_public_files_avoid_obvious_sensitive_data(self) -> None:
         patterns = {
@@ -217,7 +446,9 @@ class TitleTurnTriggerTests(unittest.TestCase):
                 r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})",
                 re.IGNORECASE,
             ),
-            "private key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+            "private key": re.compile(
+                r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+            ),
         }
         findings: list[str] = []
         for path in REPO_ROOT.rglob("*"):

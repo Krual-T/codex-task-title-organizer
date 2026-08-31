@@ -1,6 +1,6 @@
 {
   "name": "codex-task-title-organizer",
-  "version": "0.3.0",
+  "version": "0.3.0+codex.20260831144036",
   "description": "Keep current and recent Codex task titles concise, project-aware, and privacy-conscious.",
   "author": {
     "name": "znbsf",
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Codex Task Title Organizer",
     "shortDescription": "Project-aware Codex titles at useful checkpoints",
-    "longDescription": "Bundles a title-standardization skill with a privacy-conscious UserPromptSubmit hook. The hook asks the active Codex turn to set a useful title at prompt 4 and refresh it at prompt 10 only when the work changed materially.",
+    "longDescription": "Bundles a title-standardization skill with a configurable, privacy-conscious UserPromptSubmit hook. The default schedule establishes a title at prompt 2, refines it at prompt 4, and refreshes it at prompt 10 only when the work changed materially.",
     "developerName": "znbsf",
     "category": "Productivity",
     "capabilities": [

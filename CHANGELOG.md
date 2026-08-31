@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0+codex.20260831144036
+
+- Change the default Hook schedule from `4,10` to `2,4,10`.
+- Distinguish initial, refinement, and final refresh checkpoint semantics.
+- Add project JSON, environment, and plugin-data configuration with explicit
+  precedence, validation, disable support, and non-replaying schedule migration.
+- Migrate existing schema 2/3 state without firing newly added past checkpoints.
+
 ## 0.3.0
 
 - Extract the organizer into a dedicated one-plugin repository and marketplace.

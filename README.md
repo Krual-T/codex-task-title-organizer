@@ -5,8 +5,9 @@ consistent, and tied to the right project or repository.
 
 The plugin bundles one skill and one privacy-conscious `UserPromptSubmit` Hook:
 
-- prompt 4 asks the active Codex turn to set a useful title;
-- prompt 10 refreshes it only when the object or purpose changed materially;
+- prompt 2 asks the active Codex turn to establish a useful title;
+- prompt 4 refines it only when clearer task context is available;
+- prompt 10 refreshes it only when the project, object, or purpose changed materially;
 - the Hook never reads or persists prompt text;
 - old tasks can still be normalized manually in batches of at most 10.
 
@@ -34,6 +35,27 @@ State is stored under Codex's plugin data directory and contains only:
 
 It stores no generated titles, prompt excerpts, transcripts, rollout data,
 database content, full user paths, or project taxonomy.
+
+## Configure checkpoints
+
+The default schedule is `2,4,10`. For one project, create
+`.codex/task-title-organizer.json`:
+
+    {
+      "enabled": true,
+      "checkpoints": [2, 4, 10]
+    }
+
+Set `"enabled": false` to disable the Hook for that project.
+
+For a user-wide override, set `CODEX_TASK_TITLE_CHECKPOINTS` to a comma-separated
+list such as `1,3,8`. The Hook also supports `PLUGIN_DATA/config.json` for managed
+or advanced installs. Precedence is project file, environment variable,
+plugin-data file, then defaults. Values must be 1-50, unique, with at most eight
+checkpoints. Invalid configuration safely falls through to the next source.
+
+Schedule changes do not replay checkpoint numbers that already passed in an
+active task.
 
 ## Install from GitHub
 

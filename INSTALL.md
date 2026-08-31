@@ -59,3 +59,8 @@ me to review and trust its Hook. Do not edit Codex session or database files.
 
 The plugin does not create a scheduled automation. Its Hook handles current-task
 checkpoints; old-task batch cleanup remains an explicit skill action.
+
+The default Hook checkpoints are `2,4,10`. Configure one repository with
+`.codex/task-title-organizer.json`, or set the user-wide
+`CODEX_TASK_TITLE_CHECKPOINTS` environment variable. See the configuration
+section in `README.md` before applying a broader override.

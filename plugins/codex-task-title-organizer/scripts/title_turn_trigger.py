@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit title-maintenance context without reading prompt text or transcripts."""
+"""Emit configurable title-maintenance context without reading prompt text."""
 
 from __future__ import annotations
 
@@ -14,22 +14,19 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-TRIGGERS = (4, 10)
+DEFAULT_CHECKPOINTS = (2, 4, 10)
+CHECKPOINT_ENV = "CODEX_TASK_TITLE_CHECKPOINTS"
+PROJECT_CONFIG_RELATIVE = Path(".codex") / "task-title-organizer.json"
+PLUGIN_DATA_CONFIG_NAME = "config.json"
+MAX_CONFIG_BYTES = 16 * 1024
+MAX_CHECKPOINTS = 8
+MAX_CHECKPOINT_VALUE = 50
 MAX_SEEN_TURNS = 64
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _default_state() -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "prompt_count": 0,
-        "seen_turns": [],
-        "fired_thresholds": [],
-    }
 
 
 def _nonnegative_int(value: Any) -> int:
@@ -37,6 +34,98 @@ def _nonnegative_int(value: Any) -> int:
         return max(0, int(value))
     except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def _normalize_checkpoints(value: Any) -> tuple[int, ...] | None:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        raw_items: Any = [item.strip() for item in text.split(",")]
+    elif isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        return None
+
+    parsed: list[int] = []
+    for item in raw_items:
+        if isinstance(item, bool):
+            return None
+        if isinstance(item, int):
+            checkpoint = item
+        elif isinstance(item, str) and item.isdigit():
+            checkpoint = int(item)
+        else:
+            return None
+        if not 1 <= checkpoint <= MAX_CHECKPOINT_VALUE:
+            return None
+        parsed.append(checkpoint)
+
+    if not parsed or len(parsed) > MAX_CHECKPOINTS or len(set(parsed)) != len(parsed):
+        return None
+    return tuple(sorted(parsed))
+
+
+def _parse_config(payload: Any, source: str) -> tuple[bool, tuple[int, ...], str] | None:
+    if not isinstance(payload, dict):
+        return None
+    enabled = payload.get("enabled", True)
+    if not isinstance(enabled, bool):
+        return None
+    if not enabled:
+        return False, (), source
+    checkpoints = _normalize_checkpoints(payload.get("checkpoints"))
+    if checkpoints is None:
+        return None
+    return True, checkpoints, source
+
+
+def _read_config_file(path: Path, source: str) -> tuple[bool, tuple[int, ...], str] | None:
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_CONFIG_BYTES:
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return None
+    return _parse_config(payload, source)
+
+
+def _load_config(
+    payload: dict[str, Any], data_root: Path
+) -> tuple[bool, tuple[int, ...], str]:
+    cwd_text = payload.get("cwd")
+    if isinstance(cwd_text, str) and cwd_text:
+        cwd = Path(cwd_text)
+        if cwd.is_absolute():
+            project = _read_config_file(cwd / PROJECT_CONFIG_RELATIVE, "project")
+            if project is not None:
+                return project
+
+    env_value = os.environ.get(CHECKPOINT_ENV)
+    if env_value is not None:
+        if env_value.strip().lower() in {"off", "false", "disabled", "none"}:
+            return False, (), "environment"
+        checkpoints = _normalize_checkpoints(env_value)
+        if checkpoints is not None:
+            return True, checkpoints, "environment"
+
+    plugin_data = _read_config_file(
+        data_root / PLUGIN_DATA_CONFIG_NAME, "plugin-data"
+    )
+    if plugin_data is not None:
+        return plugin_data
+
+    return True, DEFAULT_CHECKPOINTS, "default"
+
+
+def _default_state(checkpoints: tuple[int, ...]) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "prompt_count": 0,
+        "seen_turns": [],
+        "fired_thresholds": [],
+        "checkpoint_signature": list(checkpoints),
+    }
 
 
 def _string_list(value: Any) -> list[str]:
@@ -48,30 +137,49 @@ def _string_list(value: Any) -> list[str]:
 def _threshold_set(value: Any) -> set[int]:
     if not isinstance(value, list):
         return set()
-    parsed = {
-        int(item)
-        for item in value
-        if isinstance(item, int) or (isinstance(item, str) and item.isdigit())
-    }
-    return parsed.intersection(TRIGGERS)
+    parsed: set[int] = set()
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int):
+            threshold = item
+        elif isinstance(item, str) and item.isdigit():
+            threshold = int(item)
+        else:
+            continue
+        if 1 <= threshold <= MAX_CHECKPOINT_VALUE:
+            parsed.add(threshold)
+    return parsed
 
 
-def _load_state(path: Path) -> dict[str, Any]:
+def _load_state(path: Path, checkpoints: tuple[int, ...]) -> dict[str, Any]:
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return _default_state()
-    if not isinstance(loaded, dict) or loaded.get("schema_version") not in (2, 3):
-        return _default_state()
+    except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeError):
+        return _default_state(checkpoints)
+    if not isinstance(loaded, dict) or loaded.get("schema_version") not in (2, 3, 4):
+        return _default_state(checkpoints)
 
-    # Schema 2 recorded tool receipts. Some runtimes do not emit nested-tool
-    # lifecycle events, so schema 3 keeps counters and drops receipt-only data.
-    state = _default_state()
+    state = _default_state(checkpoints)
     state["prompt_count"] = _nonnegative_int(loaded.get("prompt_count"))
     state["seen_turns"] = _string_list(loaded.get("seen_turns"))[-MAX_SEEN_TURNS:]
-    state["fired_thresholds"] = sorted(
-        _threshold_set(loaded.get("fired_thresholds"))
+    fired = _threshold_set(loaded.get("fired_thresholds"))
+
+    previous_signature = (
+        _normalize_checkpoints(loaded.get("checkpoint_signature"))
+        if loaded.get("schema_version") == SCHEMA_VERSION
+        else None
     )
+    if previous_signature != checkpoints:
+        # A newly introduced checkpoint must not replay after its prompt has
+        # already passed. Future checkpoints in the new schedule remain eligible.
+        fired.update(
+            checkpoint
+            for checkpoint in checkpoints
+            if checkpoint <= state["prompt_count"]
+        )
+
+    state["fired_thresholds"] = sorted(fired)
     return state
 
 
@@ -135,26 +243,40 @@ def _state_lock(path: Path) -> Iterator[None]:
             _unlock(handle)
 
 
-def _checkpoint_context(prompt_count: int, threshold: int) -> dict[str, Any]:
+def _checkpoint_context(
+    prompt_count: int,
+    threshold: int,
+    checkpoints: tuple[int, ...],
+    config_source: str,
+) -> dict[str, Any]:
     activity_mmdd = datetime.now().astimezone().strftime("%m%d")
-    if threshold == TRIGGERS[0]:
-        checkpoint_action = "Set a useful current-task title at this first checkpoint."
+    position = checkpoints.index(threshold)
+    if position == 0:
+        checkpoint_action = "Set a useful current-task title at this initial checkpoint."
+    elif position == len(checkpoints) - 1:
+        checkpoint_action = (
+            "This is the final refresh checkpoint. Rename only when the project, work "
+            "type, concrete object, or purpose changed materially; otherwise skip."
+        )
     else:
         checkpoint_action = (
-            "This is a refresh checkpoint. Rename only when the current object or "
-            "purpose changed materially since the earlier checkpoint; otherwise skip."
+            "This is a refinement checkpoint. Rename only when the current title is "
+            "missing or inaccurate, or the object and purpose can now be stated "
+            "materially more clearly; otherwise skip."
         )
 
+    schedule = ",".join(str(item) for item in checkpoints)
     context = (
         "Codex Task Title Organizer checkpoint: this is user prompt "
         f"{prompt_count} observed after the plugin was enabled (checkpoint "
-        f"{threshold}). {checkpoint_action} Finish the user's main request first, "
-        "then explicitly use $organize-codex-task-titles in Current-task checkpoint "
-        "mode before ending this same foreground turn. Generate the title only from "
-        "current-task context using `Colored emoji Domain｜Project/repository key｜"
-        "Work type｜Concrete object: purpose or symptom`, matching the task language. "
-        "When no Jira, Gerrit, issue, PR, or change key exists, prefer the project "
-        "name, repository name, or cwd basename; never emit `NO-ID`. Only use local "
+        f"{threshold}; configured schedule {schedule}; source {config_source}). "
+        f"{checkpoint_action} Finish the user's main request first, then explicitly "
+        "use $organize-codex-task-titles in Current-task checkpoint mode before "
+        "ending this same foreground turn. Generate the title only from current-task "
+        "context using `Colored emoji Domain｜Project/repository key｜Work type｜"
+        "Concrete object: purpose or symptom`, matching the task language. When no "
+        "Jira, Gerrit, issue, PR, or change key exists, prefer the project name, "
+        "repository name, or cwd basename; never emit `NO-ID`. Only use local "
         f"activity date `{activity_mmdd}` when no stable project or repository context "
         "exists. Call `codex_app__set_thread_title` without threadId only when this is "
         "a confirmed Codex task and the tool is available. Do not list or read other "
@@ -171,7 +293,10 @@ def _checkpoint_context(prompt_count: int, threshold: int) -> dict[str, Any]:
 
 
 def _handle_user_prompt(
-    payload: dict[str, Any], state: dict[str, Any]
+    payload: dict[str, Any],
+    state: dict[str, Any],
+    checkpoints: tuple[int, ...],
+    config_source: str,
 ) -> dict[str, Any] | None:
     turn_id = payload.get("turn_id")
     if not isinstance(turn_id, str) or not turn_id:
@@ -188,7 +313,7 @@ def _handle_user_prompt(
     fired = _threshold_set(state.get("fired_thresholds"))
     eligible = [
         item
-        for item in TRIGGERS
+        for item in checkpoints
         if state["prompt_count"] >= item and item not in fired
     ]
     if not eligible:
@@ -198,7 +323,9 @@ def _handle_user_prompt(
     threshold = eligible[0]
     fired.add(threshold)
     state["fired_thresholds"] = sorted(fired)
-    return _checkpoint_context(state["prompt_count"], threshold)
+    return _checkpoint_context(
+        state["prompt_count"], threshold, checkpoints, config_source
+    )
 
 
 def main() -> int:
@@ -218,14 +345,19 @@ def main() -> int:
 
     data_root = Path(data_root_text)
     try:
+        enabled, checkpoints, config_source = _load_config(payload, data_root)
+        if not enabled:
+            return 0
         data_root.mkdir(parents=True, exist_ok=True)
         session_key = _digest(session_id)
         state_path = data_root / f"{session_key}.json"
         lock_path = data_root / f"{session_key}.lock"
         output: dict[str, Any] | None = None
         with _state_lock(lock_path):
-            state = _load_state(state_path)
-            output = _handle_user_prompt(payload, state)
+            state = _load_state(state_path, checkpoints)
+            output = _handle_user_prompt(
+                payload, state, checkpoints, config_source
+            )
             _write_state(state_path, state)
         if output is not None:
             # ASCII output is portable on Windows legacy consoles; JSON parsing
