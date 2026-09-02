@@ -1,8 +1,21 @@
 {
-  "description": "Request configurable, privacy-conscious current-task title maintenance and optional bounded sidebar routing; defaults to prompt checkpoints 2, 4, and 10.",
+  "description": "Request configurable, privacy-conscious current-task title maintenance and optional bounded sidebar routing; defaults to prompt checkpoints 2, 4, and 10, with an exact title-tool completion observer.",
   "hooks": {
     "UserPromptSubmit": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import os,runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'scripts','title_turn_trigger.py'),run_name='__main__')\"",
+            "commandWindows": "py -3 -c \"import os,runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'scripts','title_turn_trigger.py'),run_name='__main__')\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__codex_app__set_thread_title$",
         "hooks": [
           {
             "type": "command",

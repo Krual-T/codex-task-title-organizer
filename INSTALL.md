@@ -26,7 +26,8 @@ list` and reuse it instead of creating a duplicate.
 1. Verify Python 3 with `py -3 --version` on Windows or `python3 --version` on
    macOS/Linux.
 2. Refresh or restart Codex and start a new task.
-3. Open `/hooks`, inspect the `UserPromptSubmit` command, and trust it.
+3. Open `/hooks`, inspect the `UserPromptSubmit` and exact `PostToolUse`
+   commands, and trust them.
 4. The counter begins when the enabled and trusted plugin first observes a
    prompt in that task session.
 

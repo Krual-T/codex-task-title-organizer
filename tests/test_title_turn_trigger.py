@@ -24,6 +24,7 @@ SECTION_ROUTING_REFERENCE = SKILL.parent / "references" / "section-routing.md"
 STYLE_REFERENCE = SKILL.parent / "references" / "title-styles.md"
 CHECKPOINT_ENV = "CODEX_TASK_TITLE_CHECKPOINTS"
 SECTION_ROUTING_ENV = "CODEX_TASK_TITLE_SECTION_ROUTING"
+TITLE_TOOL_NAME = "mcp__codex_app__set_thread_title"
 
 
 def run_hook(
@@ -64,6 +65,26 @@ def prompt_payload(
     }
 
 
+def post_tool_payload(
+    number: int,
+    *,
+    session_id: str = "thr-test",
+    tool_name: str = TITLE_TOOL_NAME,
+    title: str = "secret generated title",
+    cwd: str | None = None,
+) -> dict[str, object]:
+    return {
+        "session_id": session_id,
+        "turn_id": f"{session_id}-turn-{number}",
+        "cwd": cwd or str(REPO_ROOT),
+        "hook_event_name": "PostToolUse",
+        "tool_name": tool_name,
+        "tool_use_id": "secret-tool-use-id",
+        "tool_input": {"title": title},
+        "tool_response": {"threadId": session_id, "title": title},
+    }
+
+
 def state_path_for(data_dir: str, session_id: str = "thr-test") -> Path:
     session_key = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
     return Path(data_dir) / f"{session_key}.json"
@@ -82,6 +103,12 @@ class TitleTurnTriggerTests(unittest.TestCase):
         config = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
         handler = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]
         command = handler["commandWindows"] if os.name == "nt" else handler["command"]
+        post_handler = config["hooks"]["PostToolUse"][0]["hooks"][0]
+        post_command = (
+            post_handler["commandWindows"]
+            if os.name == "nt"
+            else post_handler["command"]
+        )
         with tempfile.TemporaryDirectory() as data_dir:
             env = os.environ.copy()
             env.pop(CHECKPOINT_ENV, None)
@@ -104,6 +131,28 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertIn(
                 "user prompt 2",
                 parsed["hookSpecificOutput"]["additionalContext"],
+            )
+            result = subprocess.run(
+                post_command,
+                input=json.dumps(post_tool_payload(2)),
+                text=True,
+                capture_output=True,
+                env=env,
+                shell=True,
+                check=True,
+            )
+            self.assertEqual(result.stdout.strip(), "")
+            state = json.loads(state_path_for(data_dir).read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["title_tool_completion_observations"],
+                [
+                    {
+                        "checkpoint": 2,
+                        "turn_token": hashlib.sha256(
+                            b"thr-test-turn-2"
+                        ).hexdigest(),
+                    }
+                ],
             )
 
     def test_default_thresholds_deduplication_and_content_privacy(self) -> None:
@@ -147,16 +196,72 @@ class TitleTurnTriggerTests(unittest.TestCase):
                     "seen_turns",
                     "fired_thresholds",
                     "checkpoint_signature",
+                    "pending_title_tool_completions",
+                    "title_tool_completion_observations",
                 },
             )
-            self.assertEqual(state["schema_version"], 4)
+            self.assertEqual(state["schema_version"], 5)
             self.assertEqual(state["checkpoint_signature"], [2, 4, 10])
             self.assertEqual(state["fired_thresholds"], [2, 4, 10])
+            self.assertEqual(state["pending_title_tool_completions"], [])
+            self.assertEqual(state["title_tool_completion_observations"], [])
             self.assertNotIn("secret prompt", state_text)
             self.assertNotIn("thr-test", state_text)
             self.assertNotIn("turn-2", state_text)
             self.assertNotIn(str(REPO_ROOT), state_text)
             self.assertNotIn("section", state_text)
+
+    def test_matching_post_tool_use_observes_completion_without_title_data(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            self.assertEqual(run_hook(data_dir, prompt_payload(1)), "")
+            self.assertTrue(run_hook(data_dir, prompt_payload(2)))
+
+            state = json.loads(state_path_for(data_dir).read_text(encoding="utf-8"))
+            expected = {
+                "checkpoint": 2,
+                "turn_token": hashlib.sha256(b"thr-test-turn-2").hexdigest(),
+            }
+            self.assertEqual(state["pending_title_tool_completions"], [expected])
+            self.assertEqual(state["title_tool_completion_observations"], [])
+
+            payload = post_tool_payload(2, title="secret title from tool payload")
+            self.assertEqual(run_hook(data_dir, payload), "")
+            self.assertEqual(run_hook(data_dir, payload), "")
+
+            state_text = state_path_for(data_dir).read_text(encoding="utf-8")
+            state = json.loads(state_text)
+            self.assertEqual(state["prompt_count"], 2)
+            self.assertEqual(state["fired_thresholds"], [2])
+            self.assertEqual(state["pending_title_tool_completions"], [])
+            self.assertEqual(state["title_tool_completion_observations"], [expected])
+            self.assertNotIn("secret title from tool payload", state_text)
+            self.assertNotIn("secret-tool-use-id", state_text)
+            self.assertNotIn("thr-test", state_text)
+
+    def test_missing_post_tool_completion_is_not_recorded_as_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            self.assertEqual(run_hook(data_dir, prompt_payload(1)), "")
+            self.assertTrue(run_hook(data_dir, prompt_payload(2)))
+            self.assertEqual(run_hook(data_dir, prompt_payload(3)), "")
+
+            state = json.loads(state_path_for(data_dir).read_text(encoding="utf-8"))
+            self.assertEqual(state["pending_title_tool_completions"], [])
+            self.assertEqual(state["title_tool_completion_observations"], [])
+
+    def test_nonmatching_post_tool_use_does_not_create_or_change_state(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            self.assertEqual(
+                run_hook(data_dir, post_tool_payload(2, tool_name="Bash")), ""
+            )
+            self.assertEqual(list(Path(data_dir).iterdir()), [])
+
+            self.assertEqual(run_hook(data_dir, prompt_payload(1)), "")
+            self.assertTrue(run_hook(data_dir, prompt_payload(2)))
+            before = state_path_for(data_dir).read_text(encoding="utf-8")
+            self.assertEqual(
+                run_hook(data_dir, post_tool_payload(2, tool_name="Bash")), ""
+            )
+            self.assertEqual(state_path_for(data_dir).read_text(encoding="utf-8"), before)
 
     def test_section_routing_project_configuration_and_state_privacy(self) -> None:
         with (
@@ -482,7 +587,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertIn("source environment", output)
             self.assertIn("configured schedule 3,7", output)
 
-    def test_migrates_v2_and_v3_state_without_replaying_past_checkpoints(self) -> None:
+    def test_migrates_v2_v3_and_v4_state_without_replaying_past_checkpoints(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
             state_path = state_path_for(data_dir)
             state_path.write_text(
@@ -503,11 +608,13 @@ class TitleTurnTriggerTests(unittest.TestCase):
 
             self.assertEqual(run_hook(data_dir, prompt_payload(7)), "")
             migrated = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schema_version"], 4)
+            self.assertEqual(migrated["schema_version"], 5)
             self.assertEqual(migrated["prompt_count"], 7)
             self.assertEqual(migrated["checkpoint_signature"], [2, 4, 10])
             self.assertEqual(migrated["fired_thresholds"], [2, 4])
             self.assertNotIn("successful_updates", migrated)
+            self.assertEqual(migrated["pending_title_tool_completions"], [])
+            self.assertEqual(migrated["title_tool_completion_observations"], [])
 
             self.assertEqual(run_hook(data_dir, prompt_payload(8)), "")
             self.assertEqual(run_hook(data_dir, prompt_payload(9)), "")
@@ -537,6 +644,27 @@ class TitleTurnTriggerTests(unittest.TestCase):
             )
             migrated = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(migrated["fired_thresholds"], [2, 4])
+
+        with tempfile.TemporaryDirectory() as data_dir:
+            state_path = state_path_for(data_dir)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 4,
+                        "prompt_count": 6,
+                        "seen_turns": [],
+                        "fired_thresholds": [2, 4],
+                        "checkpoint_signature": [2, 4, 10],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(run_hook(data_dir, prompt_payload(7)), "")
+            migrated = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["schema_version"], 5)
+            self.assertEqual(migrated["fired_thresholds"], [2, 4])
+            self.assertEqual(migrated["pending_title_tool_completions"], [])
+            self.assertEqual(migrated["title_tool_completion_observations"], [])
 
     def test_schedule_change_does_not_replay_past_checkpoints(self) -> None:
         with (
@@ -628,8 +756,13 @@ class TitleTurnTriggerTests(unittest.TestCase):
         self.assertEqual(plugin["version"].split("+", 1)[0], "0.5.0")
         self.assertLessEqual(len(plugin["interface"]["defaultPrompt"]), 3)
         self.assertNotIn("hooks", plugin)
-        self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit"})
+        self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit", "PostToolUse"})
         self.assertIn("2, 4, and 10", hooks["description"])
+        post_hook = hooks["hooks"]["PostToolUse"]
+        self.assertEqual(len(post_hook), 1)
+        self.assertEqual(post_hook[0]["matcher"], "^mcp__codex_app__set_thread_title$")
+        self.assertEqual(len(post_hook[0]["hooks"]), 1)
+        self.assertEqual(post_hook[0]["hooks"][0]["type"], "command")
         self.assertEqual(marketplace["name"], "codex-task-title-organizer")
         entry = marketplace["plugins"][0]
         self.assertEqual(entry["name"], plugin["name"])

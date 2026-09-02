@@ -3,12 +3,15 @@
 A standalone Codex plugin for keeping task titles compact, searchable, visually
 consistent, and tied to the right project or repository.
 
-The plugin bundles one skill and one privacy-conscious `UserPromptSubmit` Hook:
+The plugin bundles one skill, a privacy-conscious `UserPromptSubmit` Hook, and
+one narrowly matched `PostToolUse` observer:
 
 - prompt 2 asks the active Codex turn to establish a useful title;
 - prompt 4 refines it only when clearer task context is available;
 - prompt 10 refreshes it only when the project, object, or purpose changed materially;
 - the Hook never reads or persists prompt text;
+- the observer records only that the current title tool completed after a
+  checkpoint; it never reads the requested title or tool result;
 - old tasks can still be normalized manually in batches of at most 10.
 
 ## Title standard
@@ -58,11 +61,21 @@ tool, without a thread ID, after finishing the user's main request.
 State is stored under Codex's plugin data directory and contains only:
 
 - a SHA-256 hash of the session ID in the filename;
-- SHA-256 hashes of recently seen turn IDs;
-- the prompt count and fired checkpoints.
+- SHA-256 hashes of recently seen turn IDs and checkpoint turns awaiting the
+  current foreground turn's title-tool completion;
+- the prompt count, emitted checkpoints, and a bounded set of matching title-tool
+  completion observations.
 
 It stores no generated titles, prompt excerpts, transcripts, rollout data,
 database content, full user paths, or project taxonomy.
+
+`fired_thresholds` means only that the `UserPromptSubmit` Hook emitted checkpoint
+context. A matching `PostToolUse` event is reported separately as **title tool
+completion observed**. It is not evidence that a title changed, and a missing
+completion is not recorded as an error: a `PostToolUse` Hook does not distinguish
+no call, a failed call, an untrusted Hook, or an unsupported tool path. The
+observer matches only `mcp__codex_app__set_thread_title` and never inspects its
+input or response.
 
 ## Route renamed tasks to sidebar sections
 
@@ -125,7 +138,8 @@ codex plugin marketplace add znbsf/codex-task-title-organizer --ref main
 codex plugin add codex-task-title-organizer@codex-task-title-organizer
 ```
 
-Restart or refresh Codex, open `/hooks`, inspect the exact command, and trust it.
+Restart or refresh Codex, open `/hooks`, inspect the exact `UserPromptSubmit` and
+`PostToolUse` commands, and trust them.
 Automatic checkpoints are not active until that user review is complete.
 
 ## Install from a local checkout or ZIP

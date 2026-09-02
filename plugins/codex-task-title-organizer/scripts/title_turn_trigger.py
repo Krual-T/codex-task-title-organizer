@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit configurable title-maintenance context without reading prompt text."""
+"""Emit title-maintenance context without reading prompt or title tool payloads."""
 
 from __future__ import annotations
 
@@ -30,7 +30,9 @@ MAX_ROUTED_DOMAINS = 16
 MAX_ROUTED_DOMAIN_LENGTH = 40
 MAX_SECTION_DOMAIN_MAPPINGS = 16
 MAX_SEEN_TURNS = 64
-SCHEMA_VERSION = 4
+MAX_TITLE_TOOL_COMPLETION_OBSERVATIONS = MAX_CHECKPOINTS
+SCHEMA_VERSION = 5
+TITLE_TOOL_NAME = "mcp__codex_app__set_thread_title"
 
 SectionDomainMap = tuple[tuple[str, str], ...]
 
@@ -325,6 +327,8 @@ def _default_state(checkpoints: tuple[int, ...]) -> dict[str, Any]:
         "seen_turns": [],
         "fired_thresholds": [],
         "checkpoint_signature": list(checkpoints),
+        "pending_title_tool_completions": [],
+        "title_tool_completion_observations": [],
     }
 
 
@@ -352,12 +356,43 @@ def _threshold_set(value: Any) -> set[int]:
     return parsed
 
 
+def _is_digest(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _checkpoint_turn_records(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        turn_token = item.get("turn_token")
+        checkpoint = item.get("checkpoint")
+        if (
+            not _is_digest(turn_token)
+            or isinstance(checkpoint, bool)
+            or not isinstance(checkpoint, int)
+            or not 1 <= checkpoint <= MAX_CHECKPOINT_VALUE
+        ):
+            continue
+        record = {"turn_token": turn_token, "checkpoint": checkpoint}
+        if record not in records:
+            records.append(record)
+    return records[-MAX_TITLE_TOOL_COMPLETION_OBSERVATIONS:]
+
+
 def _load_state(path: Path, checkpoints: tuple[int, ...]) -> dict[str, Any]:
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeError):
         return _default_state(checkpoints)
-    if not isinstance(loaded, dict) or loaded.get("schema_version") not in (2, 3, 4):
+    if not isinstance(loaded, dict) or loaded.get("schema_version") not in (2, 3, 4, 5):
         return _default_state(checkpoints)
 
     state = _default_state(checkpoints)
@@ -380,6 +415,13 @@ def _load_state(path: Path, checkpoints: tuple[int, ...]) -> dict[str, Any]:
         )
 
     state["fired_thresholds"] = sorted(fired)
+    if loaded.get("schema_version") == SCHEMA_VERSION:
+        state["pending_title_tool_completions"] = _checkpoint_turn_records(
+            loaded.get("pending_title_tool_completions")
+        )
+        state["title_tool_completion_observations"] = _checkpoint_turn_records(
+            loaded.get("title_tool_completion_observations")
+        )
     return state
 
 
@@ -492,7 +534,7 @@ def _section_routing_context(
 
     return (
         " Title-based sidebar routing is enabled (source "
-        f"{source}). Only after `codex_app__set_thread_title` succeeds and returns "
+        f"{source}). Only after `mcp__codex_app__set_thread_title` succeeds and returns "
         "the current Codex `threadId` and the new title, route that same task. Derive "
         "Domain by removing exactly one leading marker and following space from the "
         "successful title, splitting on `｜`, and taking the trimmed first field. Treat "
@@ -566,7 +608,7 @@ def _checkpoint_context(
         "Jira, Gerrit, issue, PR, or change key exists, prefer the project name, "
         "repository name, or cwd basename; never emit `NO-ID`. Only use local "
         f"activity date `{activity_mmdd}` when no stable project or repository context "
-        "exists. Call `codex_app__set_thread_title` without threadId only when this is "
+        "exists. Call `mcp__codex_app__set_thread_title` without threadId only when this is "
         "a confirmed Codex task and the tool is available. Do not list or read other "
         "tasks, create a task, send a follow-up, inspect persisted prompts, transcripts, "
         "rollouts, databases, or session files, or use UI automation. Skip quietly when "
@@ -604,6 +646,10 @@ def _handle_user_prompt(
 
     seen.append(turn_token)
     state["seen_turns"] = seen[-MAX_SEEN_TURNS:]
+    # A PostToolUse completion can only be attributed to the foreground turn
+    # that emitted the checkpoint. Once a new user turn begins, do not infer
+    # that an earlier missing completion was an error or an unchanged title.
+    state["pending_title_tool_completions"] = []
     state["prompt_count"] = _nonnegative_int(state.get("prompt_count")) + 1
 
     fired = _threshold_set(state.get("fired_thresholds"))
@@ -619,6 +665,13 @@ def _handle_user_prompt(
     threshold = eligible[0]
     fired.add(threshold)
     state["fired_thresholds"] = sorted(fired)
+    pending = _checkpoint_turn_records(
+        state.get("pending_title_tool_completions")
+    )
+    pending.append({"turn_token": turn_token, "checkpoint": threshold})
+    state["pending_title_tool_completions"] = pending[
+        -MAX_TITLE_TOOL_COMPLETION_OBSERVATIONS:
+    ]
     return _checkpoint_context(
         state["prompt_count"],
         threshold,
@@ -634,6 +687,36 @@ def _handle_user_prompt(
     )
 
 
+def _handle_title_tool_completion(payload: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Record only a matching PostToolUse completion, never its title payload."""
+    if payload.get("tool_name") != TITLE_TOOL_NAME:
+        return False
+
+    turn_id = payload.get("turn_id")
+    if not isinstance(turn_id, str) or not turn_id:
+        return False
+    turn_token = _digest(turn_id)
+
+    pending = _checkpoint_turn_records(state.get("pending_title_tool_completions"))
+    matched = [record for record in pending if record["turn_token"] == turn_token]
+    if not matched:
+        return False
+
+    observations = _checkpoint_turn_records(
+        state.get("title_tool_completion_observations")
+    )
+    for record in matched:
+        if record not in observations:
+            observations.append(record)
+    state["title_tool_completion_observations"] = observations[
+        -MAX_TITLE_TOOL_COMPLETION_OBSERVATIONS:
+    ]
+    state["pending_title_tool_completions"] = [
+        record for record in pending if record["turn_token"] != turn_token
+    ]
+    return True
+
+
 def main() -> int:
     data_root_text = os.environ.get("PLUGIN_DATA")
     if not data_root_text:
@@ -642,7 +725,10 @@ def main() -> int:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError):
         return 0
-    if not isinstance(payload, dict) or payload.get("hook_event_name") != "UserPromptSubmit":
+    if not isinstance(payload, dict):
+        return 0
+    event_name = payload.get("hook_event_name")
+    if event_name not in ("UserPromptSubmit", "PostToolUse"):
         return 0
 
     session_id = payload.get("session_id")
@@ -654,6 +740,19 @@ def main() -> int:
         enabled, checkpoints, config_source = _load_config(payload, data_root)
         if not enabled:
             return 0
+        session_key = _digest(session_id)
+        state_path = data_root / f"{session_key}.json"
+        lock_path = data_root / f"{session_key}.lock"
+
+        if event_name == "PostToolUse":
+            if payload.get("tool_name") != TITLE_TOOL_NAME or not state_path.is_file():
+                return 0
+            with _state_lock(lock_path):
+                state = _load_state(state_path, checkpoints)
+                if _handle_title_tool_completion(payload, state):
+                    _write_state(state_path, state)
+            return 0
+
         (
             section_routing_enabled,
             section_prefix,
@@ -664,9 +763,6 @@ def main() -> int:
             section_routing_source,
         ) = _load_section_routing(payload, data_root)
         data_root.mkdir(parents=True, exist_ok=True)
-        session_key = _digest(session_id)
-        state_path = data_root / f"{session_key}.json"
-        lock_path = data_root / f"{session_key}.lock"
         output: dict[str, Any] | None = None
         with _state_lock(lock_path):
             state = _load_state(state_path, checkpoints)
