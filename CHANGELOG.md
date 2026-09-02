@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Add an optional, allowlist-bound `sectionDomainMap` so detailed title Domains
+  can route to an approved parent sidebar section without rewriting the title.
+
+## 0.5.0
+
+- Add optional, bounded title-Domain routing to custom sidebar sections after a
+  successful current-task rename.
+- Require explicit routing configuration; missing-section creation needs a
+  non-empty Domain allowlist and a section-count limit.
+- Keep routing fail-open, current-task-only at Hook checkpoints, and separate
+  from explicit batch cleanup.
+
 ## 0.4.0
 
 - Keep color blocks as the default and add semantic-icon and explicit custom

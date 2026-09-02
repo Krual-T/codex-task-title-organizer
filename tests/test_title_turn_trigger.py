@@ -20,8 +20,10 @@ PLUGIN_MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 SKILL = PLUGIN_ROOT / "skills" / "organize-codex-task-titles" / "SKILL.md"
 CONFIG_REFERENCE = SKILL.parent / "references" / "configuration.md"
+SECTION_ROUTING_REFERENCE = SKILL.parent / "references" / "section-routing.md"
 STYLE_REFERENCE = SKILL.parent / "references" / "title-styles.md"
 CHECKPOINT_ENV = "CODEX_TASK_TITLE_CHECKPOINTS"
+SECTION_ROUTING_ENV = "CODEX_TASK_TITLE_SECTION_ROUTING"
 
 
 def run_hook(
@@ -31,6 +33,7 @@ def run_hook(
 ) -> str:
     env = os.environ.copy()
     env.pop(CHECKPOINT_ENV, None)
+    env.pop(SECTION_ROUTING_ENV, None)
     env["PLUGIN_DATA"] = data_dir
     if extra_env:
         env.update(extra_env)
@@ -82,6 +85,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as data_dir:
             env = os.environ.copy()
             env.pop(CHECKPOINT_ENV, None)
+            env.pop(SECTION_ROUTING_ENV, None)
             env["PLUGIN_ROOT"] = str(PLUGIN_ROOT)
             env["PLUGIN_DATA"] = data_dir
             output = ""
@@ -115,6 +119,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
                 "preserve an already valid existing marker style",
                 first_context,
             )
+            self.assertNotIn("Title-based sidebar routing is enabled", first_context)
             self.assertEqual(run_hook(data_dir, prompt_payload(2)), "")
 
             self.assertEqual(run_hook(data_dir, prompt_payload(3)), "")
@@ -151,6 +156,213 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertNotIn("thr-test", state_text)
             self.assertNotIn("turn-2", state_text)
             self.assertNotIn(str(REPO_ROOT), state_text)
+            self.assertNotIn("section", state_text)
+
+    def test_section_routing_project_configuration_and_state_privacy(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root,
+                {
+                    "enabled": True,
+                    "checkpoints": [1],
+                    "sectionRouting": {
+                        "enabled": True,
+                        "sectionPrefix": "🗂️",
+                        "createMissingSections": True,
+                        "allowedDomains": ["Backend", "Mobile"],
+                        "sectionDomainMap": {"Mobile": "Backend"},
+                        "maxSections": 3,
+                    },
+                },
+            )
+            context = json.loads(
+                run_hook(data_dir, prompt_payload(1, cwd=project_root))
+            )["hookSpecificOutput"]["additionalContext"]
+
+            self.assertIn(
+                "Title-based sidebar routing is enabled (source project)",
+                context,
+            )
+            self.assertIn("`Backend`, `Mobile`", context)
+            self.assertIn("`Mobile` -> `Backend`", context)
+            self.assertIn("target section Domain", context)
+            self.assertIn("fewer than 3 custom sections start with `🗂️ `", context)
+            self.assertIn("current Codex `threadId`", context)
+            self.assertIn("Never move a ChatGPT conversation", context)
+
+            state_text = state_path_for(data_dir).read_text(encoding="utf-8")
+            self.assertNotIn("Backend", state_text)
+            self.assertNotIn("Mobile", state_text)
+            self.assertNotIn("sectionPrefix", state_text)
+
+    def test_section_domain_map_requires_allowlisted_safe_values(self) -> None:
+        environment = {
+            CHECKPOINT_ENV: "1",
+            SECTION_ROUTING_ENV: "domain",
+        }
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root,
+                {
+                    "enabled": True,
+                    "checkpoints": [1],
+                    "sectionRouting": {
+                        "enabled": True,
+                        "allowedDomains": ["Backend"],
+                        "sectionDomainMap": {"Mobile": "Backend"},
+                    },
+                },
+            )
+            context = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(1, cwd=project_root),
+                    environment,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn(
+                "Title-based sidebar routing is enabled (source environment)",
+                context,
+            )
+
+        for invalid_map in (
+            {" Mobile": "Backend", "Mobile": "Infra"},
+            {"Mobile": "Backend", "Backend": "Infra"},
+        ):
+            with (
+                tempfile.TemporaryDirectory() as data_dir,
+                tempfile.TemporaryDirectory() as project_root,
+            ):
+                write_project_config(
+                    project_root,
+                    {
+                        "enabled": True,
+                        "checkpoints": [1],
+                        "sectionRouting": {
+                            "enabled": True,
+                            "allowedDomains": ["Backend", "Mobile", "Infra"],
+                            "sectionDomainMap": invalid_map,
+                        },
+                    },
+                )
+                context = json.loads(
+                    run_hook(
+                        data_dir,
+                        prompt_payload(1, cwd=project_root),
+                        environment,
+                    )
+                )["hookSpecificOutput"]["additionalContext"]
+                self.assertIn(
+                    "Title-based sidebar routing is enabled (source environment)",
+                    context,
+                )
+                self.assertNotIn("Domain-to-section mapping", context)
+            self.assertNotIn("`Mobile` -> `Backend`", context)
+
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root,
+                {
+                    "enabled": True,
+                    "checkpoints": [1],
+                    "sectionRouting": {
+                        "enabled": True,
+                        "allowedDomains": ["Backend", "Mobile"],
+                        "sectionDomainMap": {"Mobile": "unsafe/domain"},
+                    },
+                },
+            )
+            context = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(1, cwd=project_root),
+                    environment,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn(
+                "Title-based sidebar routing is enabled (source environment)",
+                context,
+            )
+
+    def test_section_routing_environment_and_invalid_project_fallback(self) -> None:
+        environment = {
+            CHECKPOINT_ENV: "1",
+            SECTION_ROUTING_ENV: "domain",
+        }
+        with tempfile.TemporaryDirectory() as data_dir:
+            context = json.loads(
+                run_hook(data_dir, prompt_payload(1), environment)
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn(
+                "Title-based sidebar routing is enabled (source environment)",
+                context,
+            )
+            self.assertIn("No creation allowlist is configured", context)
+            self.assertIn("Do not create a missing sidebar section", context)
+
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root,
+                {
+                    "enabled": True,
+                    "checkpoints": [1],
+                    "sectionRouting": {
+                        "enabled": True,
+                        "createMissingSections": True,
+                        "allowedDomains": ["unsafe/domain"],
+                    },
+                },
+            )
+            context = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(1, cwd=project_root),
+                    environment,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn(
+                "Title-based sidebar routing is enabled (source environment)",
+                context,
+            )
+            self.assertIn("Do not create a missing sidebar section", context)
+
+    def test_section_routing_project_disable_overrides_environment(self) -> None:
+        environment = {
+            CHECKPOINT_ENV: "1",
+            SECTION_ROUTING_ENV: "domain",
+        }
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root,
+                {
+                    "enabled": True,
+                    "checkpoints": [1],
+                    "sectionRouting": {"enabled": False},
+                },
+            )
+            context = json.loads(
+                run_hook(
+                    data_dir,
+                    prompt_payload(1, cwd=project_root),
+                    environment,
+                )
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertNotIn("Title-based sidebar routing is enabled", context)
 
     def test_environment_configuration(self) -> None:
         custom_env = {CHECKPOINT_ENV: "1,3,5"}
@@ -413,7 +625,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
         hooks = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
 
         self.assertEqual(plugin["name"], "codex-task-title-organizer")
-        self.assertEqual(plugin["version"].split("+", 1)[0], "0.4.0")
+        self.assertEqual(plugin["version"].split("+", 1)[0], "0.5.0")
         self.assertLessEqual(len(plugin["interface"]["defaultPrompt"]), 3)
         self.assertNotIn("hooks", plugin)
         self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit"})
@@ -428,6 +640,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
     def test_skill_and_configuration_reference(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         config_text = CONFIG_REFERENCE.read_text(encoding="utf-8")
+        section_routing_text = SECTION_ROUTING_REFERENCE.read_text(encoding="utf-8")
         style_text = STYLE_REFERENCE.read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\nname: organize-codex-task-titles\n"))
         self.assertIn(
@@ -436,10 +649,14 @@ class TitleTurnTriggerTests(unittest.TestCase):
         )
         self.assertIn("Modify at most 10 tasks per batch", text)
         self.assertIn("references/configuration.md", text)
+        self.assertIn("references/section-routing.md", text)
         self.assertIn("references/title-styles.md", text)
         self.assertIn("task-title-organizer.json", config_text)
         self.assertIn("default", config_text)
         self.assertIn("2,4,10", config_text)
+        self.assertIn("CODEX_TASK_TITLE_SECTION_ROUTING", config_text)
+        self.assertIn("allowedDomains", section_routing_text)
+        self.assertIn("never creates one", section_routing_text)
         self.assertIn("Color blocks (default)", style_text)
         self.assertIn("Semantic icons", style_text)
         self.assertIn("Custom styles", style_text)

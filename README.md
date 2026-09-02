@@ -64,6 +64,39 @@ State is stored under Codex's plugin data directory and contains only:
 It stores no generated titles, prompt excerpts, transcripts, rollout data,
 database content, full user paths, or project taxonomy.
 
+## Route renamed tasks to sidebar sections
+
+Optional sidebar routing groups only successfully renamed **Codex tasks** by the
+title's Domain field. It is disabled by default. When enabled, it reuses a
+section named `🗂️ <Domain>` or, with an explicit allowlist, creates that section
+and moves the same current task. It never routes ChatGPT conversations or turns
+free-form project/object text into a section name.
+
+Use a project-local configuration when one project needs this behavior:
+
+```json
+{
+  "enabled": true,
+  "checkpoints": [2, 4, 10],
+  "sectionRouting": {
+    "enabled": true,
+    "sectionPrefix": "🗂️",
+    "createMissingSections": true,
+    "allowedDomains": ["Backend", "Mobile", "Infra"],
+    "sectionDomainMap": {"Mobile": "Backend"},
+    "maxSections": 12
+  }
+}
+```
+
+The list is exact and bounded, so one malformed or overly specific title cannot
+create unlimited sidebar sections. See the bundled
+[`section-routing.md`](plugins/codex-task-title-organizer/skills/organize-codex-task-titles/references/section-routing.md)
+for user-wide configuration, routing behavior, and batch limits.
+
+`sectionDomainMap` is optional: it keeps a detailed Domain in the title while
+routing it to one approved parent section.
+
 ## Configure checkpoints
 
 The default schedule is `2,4,10`. For one project, create
@@ -119,6 +152,11 @@ at most 10 and skipping active and ChatGPT tasks.
 ```
 
 ```text
+Use $organize-codex-task-titles to normalize and route recent Codex task titles
+into sidebar sections.
+```
+
+```text
 Use $organize-codex-task-titles to migrate recent compliant titles to semantic
 icons, changing only the leading marker.
 ```
@@ -137,7 +175,10 @@ CI exercises both Windows and Linux because the state lock is platform-specific.
 
 ## Safety boundaries
 
-- Current-task checkpoints never list or read other tasks.
+- Current-task checkpoints never list or read other task content. The sole
+  routing exception may read sidebar section metadata once after a successful
+  title update; it uses no task content and moves only that returned current
+  Codex task.
 - Batch operations modify only `kind=codex`, skip active tasks by default, and
   stop at 10 changes per run.
 - The plugin never uses Codex databases, session/rollout files, or UI automation

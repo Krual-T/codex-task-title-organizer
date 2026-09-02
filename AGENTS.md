@@ -12,6 +12,9 @@ marketplace entry.
   It must not read or persist prompt text, transcripts, rollouts, databases, or
   full paths.
 - Keep current-task Hook behavior separate from cross-task batch maintenance.
+- Sidebar routing is opt-in and must use only a successful current title result
+  plus sidebar section metadata. It may create a section only for an explicit,
+  bounded allowlist; never persist section IDs or route arbitrary title text.
 - Preserve the package ID `codex-task-title-organizer` for upgrade compatibility.
 - Keep the default checkpoints at `2,4,10`; configuration must remain bounded,
   fail-open, and non-replaying when a schedule changes mid-session.

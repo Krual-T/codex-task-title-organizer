@@ -1,7 +1,7 @@
 {
   "name": "codex-task-title-organizer",
-  "version": "0.4.0",
-  "description": "Keep Codex task titles concise, project-aware, privacy-conscious, and visually customizable.",
+  "version": "0.5.0",
+  "description": "Keep Codex task titles concise, project-aware, privacy-conscious, visually customizable, and optionally grouped into sidebar sections.",
   "author": {
     "name": "znbsf",
     "url": "https://github.com/znbsf"
@@ -17,8 +17,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Task Title Organizer",
-    "shortDescription": "Project-aware titles with selectable marker styles",
-    "longDescription": "Bundles a title-standardization skill with color-block, semantic-icon, and custom marker styles plus a configurable, privacy-conscious UserPromptSubmit hook. The default schedule establishes a title at prompt 2, refines it at prompt 4, and refreshes it at prompt 10 only when the work changed materially.",
+    "shortDescription": "Project-aware titles with optional sidebar grouping",
+    "longDescription": "Bundles a title-standardization skill with color-block, semantic-icon, and custom marker styles plus a configurable, privacy-conscious UserPromptSubmit hook. It can optionally route successfully renamed Codex tasks into bounded, allowlisted Domain sidebar sections.",
     "developerName": "znbsf",
     "category": "Productivity",
     "capabilities": [

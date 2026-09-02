@@ -85,7 +85,8 @@ request first, then run this section before ending the same foreground turn. Do
 not enter the batch workflow:
 
 1. Generate the title only from the current task context. Do not call
-   `list_threads`, `read_thread`, or an automation tool.
+   `list_threads`, `read_thread`, or an automation tool, except for the narrow
+   post-rename sidebar routing flow explicitly enabled by Hook context.
 2. The current task may be active. Call `set_thread_title` without a `threadId`
    so only the calling task is targeted.
 3. Prefer the current project/repository identifier or `cwd` basename over an
@@ -100,6 +101,25 @@ not enter the batch workflow:
 6. Treat title maintenance as secondary. Do not add a maintenance report unless
    a failure affects the user's decision.
 
+## Sidebar section routing
+
+When the user explicitly requests title-based sidebar grouping, or Hook context
+explicitly says that routing is enabled, read
+[references/section-routing.md](references/section-routing.md). Route by the
+final title's **Domain** field only, then apply an enabled exact parent-section
+mapping when configured. Never derive a section from a full project path,
+prompt text, or object description.
+
+For a current-task checkpoint, routing is allowed only after a successful
+`set_thread_title` call returns the current `threadId` and new title. Use that
+same returned task ID; do not discover a task ID through transcripts, databases,
+or a general task search. Call `list_threads` at most once and use only custom
+section metadata (`sectionId`, name, and `itemKeys`) to resolve the destination.
+Do not inspect, summarize, or infer other task content. Reuse exactly one
+matching section; create one only when the enabled configuration permits the
+specific Domain. If any routing step fails, keep the title result and skip the
+move quietly.
+
 ## Configure Hook checkpoints
 
 The default schedule is `2, 4, 10`. When the user explicitly asks to change or
@@ -111,8 +131,9 @@ unless the user explicitly requests that broader scope.
 ## Batch workflow
 
 1. Locate the Codex task tools `list_threads`, `read_thread`, and
-   `set_thread_title`. Use the automation tool only when the user explicitly
-   requests recurring maintenance.
+   `set_thread_title`; when title-based routing is explicitly requested, also
+   locate `create_sidebar_section` and `move_thread_to_sidebar_section`. Use the
+   automation tool only when the user explicitly requests recurring maintenance.
 2. List recent tasks and inspect both pinned and ordinary results within the
    tool's request limit. Follow supported pagination when more results exist.
 3. Modify only `kind=codex`. Count but do not rename `kind=chatgpt` entries.
@@ -134,6 +155,10 @@ unless the user explicitly requests that broader scope.
    databases, session/rollout files, or UI automation.
 10. Re-list the affected scope and report scanned, changed, failed, and skipped
     counts plus representative before/after examples.
+11. In an explicitly requested "normalize and route" batch, route at most the
+    same 10 eligible Codex tasks. A title already compliant but in the wrong
+    allowed section may be moved without rewriting its title. Skip active,
+    pinned, and ChatGPT tasks by default. Count renamed and moved separately.
 
 ## Privacy and safety
 
@@ -144,8 +169,12 @@ unless the user explicitly requests that broader scope.
   uncertain.
 - Preserve clear existing meaning and do not guess identifiers, intent, or
   validation results.
+- Routing may inspect sidebar section metadata once only when the user or
+  enabled Hook configuration authorizes it. Never persist section IDs, title
+  domains, or other sidebar metadata in Hook state.
 - Do not archive, delete, pin/unpin, create, or follow up on tasks unless the
-  user explicitly asks.
+  user explicitly asks. Creating a sidebar section is allowed only through the
+  narrow, allowlisted routing configuration.
 - Do not edit workspace files or inspect Codex SQLite, session indexes,
   transcripts, or rollout files as substitutes for task tools.
 - If a required task tool is unavailable, stop title writes and name the missing

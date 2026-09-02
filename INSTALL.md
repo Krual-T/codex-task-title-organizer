@@ -62,5 +62,7 @@ checkpoints; old-task batch cleanup remains an explicit skill action.
 
 The default Hook checkpoints are `2,4,10`. Configure one repository with
 `.codex/task-title-organizer.json`, or set the user-wide
-`CODEX_TASK_TITLE_CHECKPOINTS` environment variable. See the configuration
-section in `README.md` before applying a broader override.
+`CODEX_TASK_TITLE_CHECKPOINTS` environment variable. Title-based sidebar
+routing is disabled by default and needs an explicit bounded Domain allowlist
+before it may create sections. See the configuration section in `README.md`
+before applying a broader override.

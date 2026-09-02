@@ -57,3 +57,11 @@ is ignored and the next valid source is used.
 Changing a schedule during an active task never replays newly added checkpoints
 whose prompt numbers already passed. Future checkpoints in the new schedule
 remain eligible.
+
+## Sidebar routing
+
+Sidebar routing uses the same project file and plugin-data file, but its
+user-wide override is `CODEX_TASK_TITLE_SECTION_ROUTING`. It is disabled by
+default and has its own per-field precedence so a project routing policy can
+override a user-wide one without changing checkpoints. Read
+[section-routing.md](section-routing.md) before enabling it.

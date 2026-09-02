@@ -1,5 +1,5 @@
 {
-  "description": "Request configurable, privacy-conscious current-task title maintenance; defaults to prompt checkpoints 2, 4, and 10.",
+  "description": "Request configurable, privacy-conscious current-task title maintenance and optional bounded sidebar routing; defaults to prompt checkpoints 2, 4, and 10.",
   "hooks": {
     "UserPromptSubmit": [
       {
