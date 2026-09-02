@@ -297,11 +297,54 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertIn("fewer than 3 custom sections start with `🗂️ `", context)
             self.assertIn("current Codex `threadId`", context)
             self.assertIn("Never move a ChatGPT conversation", context)
+            self.assertNotIn("Section capacity retention is enabled", context)
+            self.assertNotIn("`mcp__codex_app__reorder_section`", context)
 
             state_text = state_path_for(data_dir).read_text(encoding="utf-8")
             self.assertNotIn("Backend", state_text)
             self.assertNotIn("Mobile", state_text)
             self.assertNotIn("sectionPrefix", state_text)
+
+    def test_section_capacity_retention_is_bounded_and_private(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as data_dir,
+            tempfile.TemporaryDirectory() as project_root,
+        ):
+            write_project_config(
+                project_root,
+                {
+                    "enabled": True,
+                    "checkpoints": [1],
+                    "sectionRouting": {
+                        "enabled": True,
+                        "allowedDomains": ["Backend"],
+                        "sectionCapacity": {
+                            "enabled": True,
+                            "maxItems": 10,
+                            "overflowDestination": "default",
+                        },
+                    },
+                },
+            )
+            context = json.loads(
+                run_hook(data_dir, prompt_payload(1, cwd=project_root))
+            )["hookSpecificOutput"]["additionalContext"]
+
+            self.assertIn("Section capacity retention is enabled", context)
+            self.assertIn("Keep at most 10 items", context)
+            self.assertIn("`mcp__codex_app__reorder_section`", context)
+            self.assertIn("`sectionId` set to null", context)
+            self.assertIn("Never submit only the retained subset", context)
+            self.assertIn("Do not call `list_threads` again or inspect any title", context)
+            self.assertIn("never move a ChatGPT conversation", context)
+            self.assertIn("Treat target `itemKeys` as opaque sidebar-order keys", context)
+            self.assertIn("map every retained or overflow `itemKey`", context)
+            self.assertIn("`limit` 50", context)
+
+            state_text = state_path_for(data_dir).read_text(encoding="utf-8")
+            self.assertNotIn("Backend", state_text)
+            self.assertNotIn("sectionCapacity", state_text)
+            self.assertNotIn("overflowDestination", state_text)
 
     def test_section_domain_map_requires_allowlisted_safe_values(self) -> None:
         environment = {
@@ -397,6 +440,47 @@ class TitleTurnTriggerTests(unittest.TestCase):
                 "Title-based sidebar routing is enabled (source environment)",
                 context,
             )
+
+    def test_invalid_section_capacity_falls_through_to_environment(self) -> None:
+        environment = {
+            CHECKPOINT_ENV: "1",
+            SECTION_ROUTING_ENV: "domain",
+        }
+        for capacity in (
+            {"enabled": True, "maxItems": 0, "overflowDestination": "default"},
+            {"enabled": True, "maxItems": 51, "overflowDestination": "default"},
+            {"enabled": True, "maxItems": True, "overflowDestination": "default"},
+            {"enabled": True, "maxItems": 10, "overflowDestination": "archive"},
+            [],
+        ):
+            with (
+                tempfile.TemporaryDirectory() as data_dir,
+                tempfile.TemporaryDirectory() as project_root,
+            ):
+                write_project_config(
+                    project_root,
+                    {
+                        "enabled": True,
+                        "checkpoints": [1],
+                        "sectionRouting": {
+                            "enabled": True,
+                            "allowedDomains": ["Backend"],
+                            "sectionCapacity": capacity,
+                        },
+                    },
+                )
+                context = json.loads(
+                    run_hook(
+                        data_dir,
+                        prompt_payload(1, cwd=project_root),
+                        environment,
+                    )
+                )["hookSpecificOutput"]["additionalContext"]
+                self.assertIn(
+                    "Title-based sidebar routing is enabled (source environment)",
+                    context,
+                )
+                self.assertNotIn("Section capacity retention is enabled", context)
 
     def test_section_routing_environment_and_invalid_project_fallback(self) -> None:
         environment = {
@@ -789,6 +873,9 @@ class TitleTurnTriggerTests(unittest.TestCase):
         self.assertIn("2,4,10", config_text)
         self.assertIn("CODEX_TASK_TITLE_SECTION_ROUTING", config_text)
         self.assertIn("allowedDomains", section_routing_text)
+        self.assertIn("sectionCapacity", section_routing_text)
+        self.assertIn("overflowDestination", section_routing_text)
+        self.assertIn("reorder_section", section_routing_text)
         self.assertIn("never creates one", section_routing_text)
         self.assertIn("Color blocks (default)", style_text)
         self.assertIn("Semantic icons", style_text)

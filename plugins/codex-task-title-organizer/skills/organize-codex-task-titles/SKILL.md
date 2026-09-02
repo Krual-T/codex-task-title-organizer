@@ -115,10 +115,17 @@ For a current-task checkpoint, routing is allowed only after a successful
 same returned task ID; do not discover a task ID through transcripts, databases,
 or a general task search. Call `list_threads` at most once and use only custom
 section metadata (`sectionId`, name, and `itemKeys`) to resolve the destination.
-Do not inspect, summarize, or infer other task content. Reuse exactly one
+When enabled `sectionCapacity` needs to verify an exact overflow candidate, it
+may additionally use only task ID and `kind` metadata from that same result;
+never inspect, summarize, or infer other task content. Reuse exactly one
 matching section; create one only when the enabled configuration permits the
-specific Domain. If any routing step fails, keep the title result and skip the
-move quietly.
+specific Domain. With enabled capacity retention, use the returned current task
+ID first, map every remaining target `itemKey` deterministically to its returned
+task or conversation ID, then pass those mapped IDs exactly once to
+`reorder_section`, including any retained ChatGPT conversation. Return only
+confirmed Codex overflow tasks to the configured safe destination. If any
+mapping or routing step fails, keep the title result and skip the remaining move
+or reorder quietly.
 
 ## Configure Hook checkpoints
 
@@ -173,8 +180,10 @@ unless the user explicitly requests that broader scope.
   enabled Hook configuration authorizes it. Never persist section IDs, title
   domains, or other sidebar metadata in Hook state.
 - Do not archive, delete, pin/unpin, create, or follow up on tasks unless the
-  user explicitly asks. Creating a sidebar section is allowed only through the
-  narrow, allowlisted routing configuration.
+  user explicitly asks. The only exception is explicitly enabled bounded
+  `sectionCapacity`: it may reorder one resolved target section and return
+  confirmed Codex overflow tasks to the default Tasks area. Creating a sidebar
+  section is allowed only through the narrow, allowlisted routing configuration.
 - Do not edit workspace files or inspect Codex SQLite, session indexes,
   transcripts, or rollout files as substitutes for task tools.
 - If a required task tool is unavailable, stop title writes and name the missing

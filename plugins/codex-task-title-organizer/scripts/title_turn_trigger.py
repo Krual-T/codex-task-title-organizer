@@ -24,8 +24,16 @@ MAX_CHECKPOINTS = 8
 MAX_CHECKPOINT_VALUE = 50
 DEFAULT_SECTION_PREFIX = "🗂️"
 DEFAULT_MAX_SECTIONS = 12
+DEFAULT_MAX_SECTION_ITEMS = 10
+DEFAULT_SECTION_OVERFLOW_DESTINATION = "default"
+DISABLED_SECTION_CAPACITY = (
+    False,
+    DEFAULT_MAX_SECTION_ITEMS,
+    DEFAULT_SECTION_OVERFLOW_DESTINATION,
+)
 MAX_SECTION_PREFIX_LENGTH = 16
 MAX_SECTION_COUNT = 20
+MAX_SECTION_ITEMS = 50
 MAX_ROUTED_DOMAINS = 16
 MAX_ROUTED_DOMAIN_LENGTH = 40
 MAX_SECTION_DOMAIN_MAPPINGS = 16
@@ -35,6 +43,17 @@ SCHEMA_VERSION = 5
 TITLE_TOOL_NAME = "mcp__codex_app__set_thread_title"
 
 SectionDomainMap = tuple[tuple[str, str], ...]
+SectionCapacity = tuple[bool, int, str]
+SectionRoutingConfig = tuple[
+    bool,
+    str,
+    bool,
+    tuple[str, ...],
+    SectionDomainMap,
+    int,
+    SectionCapacity,
+    str,
+]
 
 
 def _digest(value: str) -> str:
@@ -167,6 +186,14 @@ def _normalize_max_sections(value: Any) -> int | None:
     return value
 
 
+def _normalize_max_section_items(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if not 1 <= value <= MAX_SECTION_ITEMS:
+        return None
+    return value
+
+
 def _normalize_routed_domain(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -222,16 +249,51 @@ def _normalize_section_domain_map(value: Any) -> SectionDomainMap | None:
     return tuple(mappings)
 
 
+def _parse_section_capacity(value: Any) -> SectionCapacity | None:
+    if value is None:
+        return DISABLED_SECTION_CAPACITY
+    if not isinstance(value, dict):
+        return None
+
+    enabled = value.get("enabled", False)
+    if not isinstance(enabled, bool):
+        return None
+    if not enabled:
+        return DISABLED_SECTION_CAPACITY
+
+    max_items = _normalize_max_section_items(
+        value.get("maxItems", DEFAULT_MAX_SECTION_ITEMS)
+    )
+    overflow_destination = value.get(
+        "overflowDestination", DEFAULT_SECTION_OVERFLOW_DESTINATION
+    )
+    if (
+        max_items is None
+        or overflow_destination != DEFAULT_SECTION_OVERFLOW_DESTINATION
+    ):
+        return None
+    return True, max_items, overflow_destination
+
+
 def _parse_section_routing_value(
     routing: Any, source: str
-) -> tuple[bool, str, bool, tuple[str, ...], SectionDomainMap, int, str] | None:
+) -> SectionRoutingConfig | None:
     if not isinstance(routing, dict):
         return None
     enabled = routing.get("enabled", False)
     if not isinstance(enabled, bool):
         return None
     if not enabled:
-        return False, DEFAULT_SECTION_PREFIX, False, (), (), DEFAULT_MAX_SECTIONS, source
+        return (
+            False,
+            DEFAULT_SECTION_PREFIX,
+            False,
+            (),
+            (),
+            DEFAULT_MAX_SECTIONS,
+            DISABLED_SECTION_CAPACITY,
+            source,
+        )
 
     prefix = _normalize_section_prefix(
         routing.get("sectionPrefix", DEFAULT_SECTION_PREFIX)
@@ -245,7 +307,14 @@ def _parse_section_routing_value(
     raw_domains = routing.get("allowedDomains", [])
     domains = _normalize_routed_domains(raw_domains)
     domain_map = _normalize_section_domain_map(routing.get("sectionDomainMap"))
-    if prefix is None or max_sections is None or domains is None or domain_map is None:
+    section_capacity = _parse_section_capacity(routing.get("sectionCapacity"))
+    if (
+        prefix is None
+        or max_sections is None
+        or domains is None
+        or domain_map is None
+        or section_capacity is None
+    ):
         return None
     # Creating a new section from arbitrary title text would be surprising and
     # vulnerable to untrusted title data. It is permitted only for an explicit,
@@ -260,12 +329,21 @@ def _parse_section_routing_value(
         )
     ):
         return None
-    return True, prefix, create_missing, domains, domain_map, max_sections, source
+    return (
+        True,
+        prefix,
+        create_missing,
+        domains,
+        domain_map,
+        max_sections,
+        section_capacity,
+        source,
+    )
 
 
 def _parse_section_routing(
     payload: Any, source: str
-) -> tuple[bool, str, bool, tuple[str, ...], SectionDomainMap, int, str] | None:
+) -> SectionRoutingConfig | None:
     if not isinstance(payload, dict) or "sectionRouting" not in payload:
         return None
     return _parse_section_routing_value(payload["sectionRouting"], source)
@@ -273,14 +351,32 @@ def _parse_section_routing(
 
 def _parse_section_routing_environment(
     value: str | None,
-) -> tuple[bool, str, bool, tuple[str, ...], SectionDomainMap, int, str] | None:
+) -> SectionRoutingConfig | None:
     if value is None:
         return None
     normalized = value.strip().lower()
     if normalized in {"off", "false", "disabled", "none"}:
-        return False, DEFAULT_SECTION_PREFIX, False, (), (), DEFAULT_MAX_SECTIONS, "environment"
+        return (
+            False,
+            DEFAULT_SECTION_PREFIX,
+            False,
+            (),
+            (),
+            DEFAULT_MAX_SECTIONS,
+            DISABLED_SECTION_CAPACITY,
+            "environment",
+        )
     if normalized in {"domain", "on", "true", "enabled"}:
-        return True, DEFAULT_SECTION_PREFIX, False, (), (), DEFAULT_MAX_SECTIONS, "environment"
+        return (
+            True,
+            DEFAULT_SECTION_PREFIX,
+            False,
+            (),
+            (),
+            DEFAULT_MAX_SECTIONS,
+            DISABLED_SECTION_CAPACITY,
+            "environment",
+        )
     try:
         return _parse_section_routing_value(json.loads(value), "environment")
     except json.JSONDecodeError:
@@ -289,7 +385,7 @@ def _parse_section_routing_environment(
 
 def _read_section_routing_file(
     path: Path, source: str
-) -> tuple[bool, str, bool, tuple[str, ...], SectionDomainMap, int, str] | None:
+) -> SectionRoutingConfig | None:
     payload = _read_json_file(path)
     if payload is None:
         return None
@@ -298,7 +394,7 @@ def _read_section_routing_file(
 
 def _load_section_routing(
     payload: dict[str, Any], data_root: Path
-) -> tuple[bool, str, bool, tuple[str, ...], SectionDomainMap, int, str]:
+) -> SectionRoutingConfig:
     project_path = _project_config_path(payload)
     if project_path is not None:
         project = _read_section_routing_file(project_path, "project")
@@ -317,7 +413,16 @@ def _load_section_routing(
     if plugin_data is not None:
         return plugin_data
 
-    return False, DEFAULT_SECTION_PREFIX, False, (), (), DEFAULT_MAX_SECTIONS, "default"
+    return (
+        False,
+        DEFAULT_SECTION_PREFIX,
+        False,
+        (),
+        (),
+        DEFAULT_MAX_SECTIONS,
+        DISABLED_SECTION_CAPACITY,
+        "default",
+    )
 
 
 def _default_state(checkpoints: tuple[int, ...]) -> dict[str, Any]:
@@ -492,6 +597,7 @@ def _section_routing_context(
     allowed_domains: tuple[str, ...],
     section_domain_map: SectionDomainMap,
     max_sections: int,
+    section_capacity: SectionCapacity,
     source: str,
 ) -> str:
     if not enabled:
@@ -532,6 +638,48 @@ def _section_routing_context(
     else:
         creation_rule = "Do not create a missing sidebar section."
 
+    capacity_enabled, max_section_items, _ = section_capacity
+    if capacity_enabled:
+        capacity_rule = (
+            " Section capacity retention is enabled. Treat target `itemKeys` as opaque "
+            "sidebar-order keys, not `threadIds`. Build a planned order from the returned "
+            "current `threadId` first, followed by each other target item once in its "
+            "existing order. Determine whether the current task is already present only "
+            "when a target `itemKey` ends in `:` plus that returned `threadId`. From the "
+            "same list result, map every retained or overflow `itemKey` to exactly one "
+            "listed task or conversation by a suffix match to its returned `id`; use only "
+            "that ID and `kind`. If any required mapping is missing or ambiguous, skip "
+            "capacity work and do not reorder. If the current task is absent, move it to "
+            "the target first; if that move fails, stop all capacity work. Do not call "
+            "`list_threads` again or inspect any title, summary, prompt, or message. "
+            "Keep at most "
+            f"{max_section_items} items. If every overflow item is a confirmed Codex task, "
+            "move those overflow tasks bottom-first to the default Tasks area with "
+            "`mcp__codex_app__move_thread_to_sidebar_section` and `sectionId` set to "
+            "null. If any overflow item is unknown or a ChatGPT conversation, do not move "
+            "any overflow item. After all required moves succeed, call "
+            "`mcp__codex_app__reorder_section` with the current task first and `threadIds` "
+            "equal to every remaining mapped task/conversation ID exactly once, including "
+            "any retained ChatGPT conversation. When trimming is skipped, you may still "
+            "reorder the complete mapped list with the current task first. Never submit "
+            "only the retained subset to `reorder_section`. "
+            "If a move or reorder fails, keep the successful title and any successful "
+            "prior move, then stop without retries. A newly created target section is "
+            "empty, so move only the current task and do not reorder it. "
+        )
+        operation_rule = (
+            "Apart from this enabled capacity action, never move a ChatGPT conversation, "
+            "delete, rename, pin, unpin, or inspect other task content."
+        )
+    else:
+        capacity_rule = ""
+        operation_rule = (
+            "If a target `itemKey` ends in `:` plus the returned current `threadId`, do not "
+            "move it; otherwise call `mcp__codex_app__move_thread_to_sidebar_section` with "
+            "that current `threadId` and the resolved section ID. Never move a ChatGPT conversation, "
+            "never delete, rename, reorder, pin, unpin, or inspect other tasks."
+        )
+
     return (
         " Title-based sidebar routing is enabled (source "
         f"{source}). Only after `mcp__codex_app__set_thread_title` succeeds and returns "
@@ -542,16 +690,14 @@ def _section_routing_context(
         "`｜`, `/`, `\\`, `://`, or `@`, or exceeds 40 characters. "
         f"{mapping_rule}The target section name is `{prefix_with_space}` plus the target "
         f"section Domain. {domain_rule} "
-        "Call `codex_app__list_threads` once only to resolve custom sidebar section "
-        "names, IDs, and `itemKeys`; do not inspect or infer any other task's content. "
+        "Call `mcp__codex_app__list_threads` once only with `limit` 50 to resolve custom "
+        "sidebar section names, IDs, and `itemKeys`; when capacity retention is enabled, "
+        "use only task IDs and kinds needed to map an exact section item. Do not inspect "
+        "or infer any other task's content. "
         "Reuse exactly one matching custom section and skip ambiguous duplicates. "
         f"{creation_rule} When a new section is created, use only its returned `sectionId`. "
-        "If its `itemKeys` already contains the current task, do not move it; otherwise "
-        "call `codex_app__move_thread_to_sidebar_section` with the returned current "
-        "`threadId` and the resolved section ID. Never move a ChatGPT conversation, "
-        "never route without a successful title write, and never delete, rename, reorder, "
-        "pin, unpin, or inspect other tasks. Routing failure must not undo or misreport "
-        "the title result."
+        f"{capacity_rule}{operation_rule} Never route without a successful title write. "
+        "Routing failure must not undo or misreport the title result."
     )
 
 
@@ -566,6 +712,7 @@ def _checkpoint_context(
     allowed_domains: tuple[str, ...],
     section_domain_map: SectionDomainMap,
     max_sections: int,
+    section_capacity: SectionCapacity,
     section_routing_source: str,
 ) -> dict[str, Any]:
     activity_mmdd = datetime.now().astimezone().strftime("%m%d")
@@ -592,6 +739,7 @@ def _checkpoint_context(
         allowed_domains,
         section_domain_map,
         max_sections,
+        section_capacity,
         section_routing_source,
     )
     context = (
@@ -634,6 +782,7 @@ def _handle_user_prompt(
     allowed_domains: tuple[str, ...],
     section_domain_map: SectionDomainMap,
     max_sections: int,
+    section_capacity: SectionCapacity,
     section_routing_source: str,
 ) -> dict[str, Any] | None:
     turn_id = payload.get("turn_id")
@@ -683,6 +832,7 @@ def _handle_user_prompt(
         allowed_domains,
         section_domain_map,
         max_sections,
+        section_capacity,
         section_routing_source,
     )
 
@@ -760,6 +910,7 @@ def main() -> int:
             allowed_domains,
             section_domain_map,
             max_sections,
+            section_capacity,
             section_routing_source,
         ) = _load_section_routing(payload, data_root)
         data_root.mkdir(parents=True, exist_ok=True)
@@ -777,6 +928,7 @@ def main() -> int:
                 allowed_domains,
                 section_domain_map,
                 max_sections,
+                section_capacity,
                 section_routing_source,
             )
             _write_state(state_path, state)

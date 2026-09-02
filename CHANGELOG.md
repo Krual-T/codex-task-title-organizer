@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add optional, bounded `sectionCapacity` retention: route the current task to
+  the top, keep a configured maximum, and return confirmed Codex overflow tasks
+  to the default Tasks area without deleting or archiving them.
 - Add an optional, allowlist-bound `sectionDomainMap` so detailed title Domains
   can route to an approved parent sidebar section without rewriting the title.
 

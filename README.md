@@ -97,7 +97,12 @@ Use a project-local configuration when one project needs this behavior:
     "createMissingSections": true,
     "allowedDomains": ["Backend", "Mobile", "Infra"],
     "sectionDomainMap": {"Mobile": "Backend"},
-    "maxSections": 12
+    "maxSections": 12,
+    "sectionCapacity": {
+      "enabled": true,
+      "maxItems": 10,
+      "overflowDestination": "default"
+    }
   }
 }
 ```
@@ -109,6 +114,15 @@ for user-wide configuration, routing behavior, and batch limits.
 
 `sectionDomainMap` is optional: it keeps a detailed Domain in the title while
 routing it to one approved parent section.
+
+`sectionCapacity` is separately opt-in. It keeps a routed section newest-first:
+after a successful rename, the current task is moved to the top and the section
+retains at most `maxItems` (10 by default). Confirmed Codex overflow tasks return
+to the normal Tasks area through the safe `"default"` destination; they are not
+deleted or archived. It never moves a ChatGPT conversation, re-reads the sidebar,
+or stores sidebar IDs. See the bundled
+[`section-routing.md`](plugins/codex-task-title-organizer/skills/organize-codex-task-titles/references/section-routing.md)
+for the exact failure and ordering boundaries.
 
 ## Configure checkpoints
 

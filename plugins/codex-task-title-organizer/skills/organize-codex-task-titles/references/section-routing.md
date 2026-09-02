@@ -22,7 +22,12 @@ Add `sectionRouting` to that project's `.codex/task-title-organizer.json`:
     "createMissingSections": true,
     "allowedDomains": ["Backend", "Mobile", "Infra"],
     "sectionDomainMap": {"Mobile": "Backend"},
-    "maxSections": 12
+    "maxSections": 12,
+    "sectionCapacity": {
+      "enabled": true,
+      "maxItems": 10,
+      "overflowDestination": "default"
+    }
   }
 }
 ```
@@ -43,6 +48,16 @@ For example, a title with Domain `Mobile` can move into `🗂️ Backend` withou
 rewriting `Mobile` in the title. Omitted allowlisted Domains map to themselves.
 Normalized duplicate sources, self-maps, and mapping chains are invalid: route
 at most once from the title Domain to its configured parent.
+
+`sectionCapacity` is optional and disabled by default. When enabled, it makes
+each routed target section a newest-first bounded queue: the successfully
+renamed current task is placed first, and at most `maxItems` entries remain.
+`maxItems` is an integer from 1 through 50 and defaults to 10 when capacity is
+enabled. `overflowDestination` currently accepts only `"default"`, which
+returns confirmed overflow Codex tasks to the normal Tasks area; it does not
+delete, archive, or persist a private destination section ID. Any malformed
+capacity configuration disables that routing source and falls through to the
+next configuration source.
 
 With no allowlist, routing may reuse an existing exact generated section but
 never creates one. With routing disabled or malformed configuration, title
@@ -71,16 +86,37 @@ After a current task is successfully renamed, the active Codex turn:
 2. Parses the Domain after the one leading marker and before the first `｜`, then
    applies an enabled exact `sectionDomainMap` before choosing the target.
 3. Looks up custom sidebar sections once, using only their IDs, names, and
-   `itemKeys`.
+   `itemKeys`, with `list_threads` `limit` set to 50 so current task IDs can be
+   resolved without a second listing.
 4. Reuses exactly one section named `<sectionPrefix> <mapped Domain>`.
 5. Creates that section only when creation is enabled, the Domain is allowlisted,
    and fewer than `maxSections` generated sections share the prefix.
 6. Moves only the returned current Codex task. If it is already in the target
-   section, it is left in place.
+   section, it is left in place unless optional capacity retention is enabled.
+7. With enabled `sectionCapacity`, constructs the planned target order from the
+   current task followed by the pre-move `itemKeys`, treating those keys as
+   opaque ordering handles rather than task IDs. It maps each required key to
+   exactly one returned task or conversation ID through an exact suffix match,
+   and skips capacity work when any mapping is missing or ambiguous. It uses no
+   second sidebar listing and never reads a title, summary, prompt, or message.
+8. If that planned order exceeds `maxItems`, it checks only each overflow
+   item's ID and `kind` from the same list result. When every overflow item is
+   a confirmed Codex task, it moves all overflow entries bottom-first to the
+   default Tasks area, then calls `reorder_section` with the remaining complete
+   mapped `threadIds` list and the current task at the top. That list includes
+   every retained task or conversation ID, including a retained ChatGPT
+   conversation, exactly once. It never passes raw `itemKeys` to
+   `reorder_section` or moves a ChatGPT conversation. If an overflow item is
+   unknown or non-Codex, capacity trimming is skipped; the current task may
+   still be moved to the top with the complete mapped list.
 
 Duplicate target names, invalid Domains, missing tool results, and any tool
 error are fail-open: the title remains and the move is skipped. The feature does
-not delete, rename, reorder, pin, or unpin sections or tasks.
+not delete, rename, pin, or unpin sections or tasks. Capacity reordering is
+allowed only when explicitly enabled and must include every remaining target
+item exactly once; a partial `reorder_section` list is invalid. Any capacity
+move or reorder failure leaves the successful title and prior successful move in
+place, then stops without retrying.
 
 For manual batch routing, use an explicit request such as:
 
@@ -89,4 +125,5 @@ Use $organize-codex-task-titles to normalize and route recent Codex task titles 
 ```
 
 The batch still handles at most 10 eligible Codex tasks and reports renamed and
-moved counts separately.
+moved counts separately. Capacity retention applies only to the current-task
+Hook routing flow, not to batch cleanup.
