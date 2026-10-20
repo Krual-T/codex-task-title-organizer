@@ -58,6 +58,15 @@ counts unique prompts, then adds a narrowly scoped developer instruction to the
 same foreground turn. The active Codex turn uses the public current-task title
 tool, without a thread ID, after finishing the user's main request.
 
+Automatic title maintenance applies only to the main agent of a persistent task.
+Hook events carrying Codex's subagent identity fields (`agent_id` or `agent_type`)
+or a null or missing `transcript_path` return before loading configuration or
+accessing state. Codex supplies a null transcript path for ephemeral side chats,
+which cannot be renamed. The Hook checks only this metadata; it never reads the
+transcript or stores its path. Skipped events do not count prompts, emit title
+checkpoints, or record tool completions, even if an older version created state.
+The skill also tells subagents and side chats to skip inherited title checkpoints.
+
 State is stored under Codex's plugin data directory and contains only:
 
 - a SHA-256 hash of the session ID in the filename;

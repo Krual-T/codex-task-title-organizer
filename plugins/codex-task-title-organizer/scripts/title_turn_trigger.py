@@ -877,6 +877,13 @@ def main() -> int:
         return 0
     if not isinstance(payload, dict):
         return 0
+    # Title maintenance belongs to persistent main tasks, not subagents.
+    if payload.get("agent_id") or payload.get("agent_type"):
+        return 0
+    # Ephemeral side chats have no transcript path and cannot be renamed.
+    # Check only the metadata; never open or persist the transcript path.
+    if payload.get("transcript_path") is None:
+        return 0
     event_name = payload.get("hook_event_name")
     if event_name not in ("UserPromptSubmit", "PostToolUse"):
         return 0

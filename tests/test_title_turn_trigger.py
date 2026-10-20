@@ -58,6 +58,7 @@ def prompt_payload(
 ) -> dict[str, object]:
     return {
         "session_id": session_id,
+        "transcript_path": "/unavailable/synthetic-transcript.jsonl",
         "turn_id": f"{session_id}-turn-{number}",
         "cwd": cwd or str(REPO_ROOT),
         "hook_event_name": "UserPromptSubmit",
@@ -75,6 +76,7 @@ def post_tool_payload(
 ) -> dict[str, object]:
     return {
         "session_id": session_id,
+        "transcript_path": "/unavailable/synthetic-transcript.jsonl",
         "turn_id": f"{session_id}-turn-{number}",
         "cwd": cwd or str(REPO_ROOT),
         "hook_event_name": "PostToolUse",
@@ -99,6 +101,49 @@ def write_project_config(project_root: str, payload: dict[str, object]) -> None:
 
 
 class TitleTurnTriggerTests(unittest.TestCase):
+    def test_subagent_events_do_not_create_state(self) -> None:
+        for identity in ({"agent_id": "child-agent"}, {"agent_type": "explorer"}):
+            with self.subTest(identity=identity), tempfile.TemporaryDirectory() as data_dir:
+                for payload in (prompt_payload(1), prompt_payload(2), post_tool_payload(2)):
+                    payload.update(identity)
+                    self.assertEqual(run_hook(data_dir, payload), "")
+                    self.assertEqual(list(Path(data_dir).iterdir()), [])
+
+    def test_subagent_events_leave_preexisting_state_unchanged(self) -> None:
+        for payload in (prompt_payload(3), post_tool_payload(2)):
+            with self.subTest(event=payload["hook_event_name"]), tempfile.TemporaryDirectory() as data_dir:
+                run_hook(data_dir, prompt_payload(1))
+                run_hook(data_dir, prompt_payload(2))
+                before = state_path_for(data_dir).read_bytes()
+                payload.update(agent_id="child-agent", agent_type="default")
+                self.assertEqual(run_hook(data_dir, payload), "")
+                self.assertEqual(state_path_for(data_dir).read_bytes(), before)
+
+    def test_ephemeral_events_do_not_create_state(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            for payload in (prompt_payload(1), prompt_payload(2), post_tool_payload(2)):
+                payload["transcript_path"] = None
+                self.assertEqual(run_hook(data_dir, payload), "")
+                self.assertEqual(list(Path(data_dir).iterdir()), [])
+
+    def test_ephemeral_events_leave_preexisting_state_unchanged(self) -> None:
+        for payload in (prompt_payload(3), post_tool_payload(2)):
+            with self.subTest(event=payload["hook_event_name"]), tempfile.TemporaryDirectory() as data_dir:
+                # Older versions could start title maintenance in side chats.
+                run_hook(data_dir, prompt_payload(1))
+                run_hook(data_dir, prompt_payload(2))
+                before = state_path_for(data_dir).read_bytes()
+                payload["transcript_path"] = None
+                self.assertEqual(run_hook(data_dir, payload), "")
+                self.assertEqual(state_path_for(data_dir).read_bytes(), before)
+
+    def test_events_without_transcript_metadata_skip_title_maintenance(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            for payload in (prompt_payload(1), prompt_payload(2), post_tool_payload(2)):
+                del payload["transcript_path"]
+                self.assertEqual(run_hook(data_dir, payload), "")
+                self.assertEqual(list(Path(data_dir).iterdir()), [])
+
     def test_packaged_hook_command_runs(self) -> None:
         config = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
         handler = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]

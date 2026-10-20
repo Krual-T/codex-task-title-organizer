@@ -5,6 +5,10 @@ description: Standardize and safely rename Codex task titles with color-block, s
 
 # Organize Codex task titles
 
+Run title maintenance only from the main agent of a persistent task. If you are
+a subagent or are in a side or ephemeral conversation, skip this skill, including
+inherited title checkpoints. Do not rename your own thread or its parent task.
+
 ## Build the title
 
 Use this structure:
