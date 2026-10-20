@@ -11,8 +11,8 @@ The plugin bundles one skill and three privacy-conscious Hooks:
 - the Hook never reads or persists prompt text;
 - `PostToolUse` verifies the current task's title-tool receipt in memory without
   retaining the requested or returned title;
-- `Stop` requests at most one recovery continuation per turn when a title write
-  is due but has not been confirmed;
+- `Stop` requests at most one recovery continuation per checkpoint when a title
+  write is due but has not been confirmed;
 - old tasks can still be normalized manually in batches of at most 10.
 
 ## Title standard
@@ -81,7 +81,8 @@ tasks no longer create individual JSON or lock files. Active state contains only
 - the prompt count, emitted checkpoints, and a bounded set of matching title-tool
   completion observations;
 - a bounded list of turn hashes with each turn's last title-write result;
-- a title-write confirmation flag and the hashed turn ID of the last Stop recovery.
+- a title-write confirmation flag and the hashed turn ID of the current
+  checkpoint's Stop recovery, if used.
 
 It stores no generated titles, prompt excerpts, transcripts, rollout data,
 Codex database content, full user paths, or project taxonomy.
@@ -109,14 +110,16 @@ an initial successful write. Results are capped at 64 turns, consumed by the
 matching Stop, and cleared when a new user interaction begins. Existing schema
 version 7 state remains readable.
 
-From the first configured checkpoint onward, `Stop` recovers a missing first
-confirmation, a later failed title write, or a missing final confirmation. It
-does not force an optional intermediate refinement after a title has been
-confirmed. The recovery uses the same current task and the public title tool,
-then stops. `stop_hook_active` and the saved turn
-ID prevent repeated continuations; an unconfirmed recovery produces a warning
-instead of another continuation. An interrupted task can recover when the user
-next resumes it. Idle tasks are never scanned.
+At an emitted checkpoint, `Stop` can recover a missing first confirmation, a
+failed title write, or a missing final confirmation. It does not force an
+optional intermediate refinement after a title has been confirmed. Each
+checkpoint allows one automatic recovery continuation, using the same current
+task and the public title tool. The saved recovery turn ID remains set until
+another checkpoint is emitted, so resumed turns cannot renew that allowance.
+If the tool is unavailable or recovery fails, the turn ends normally and
+automatic attempts wait for the next checkpoint. An interrupted checkpoint also
+waits for the next checkpoint once a new user prompt begins. Manual title writes
+can still be confirmed between checkpoints. Idle tasks are never scanned.
 
 Codex displays Stop continuation feedback in the chat. The Hook emits one short
 instruction linking to the installed title skill; detailed instructions stay in
@@ -129,17 +132,18 @@ write, even if the title is unchanged. Earlier success does not satisfy this
 final check. After Stop confirms a successful current-turn receipt at or after
 that checkpoint, the row becomes `done = 1, state_json = NULL`: counters and turn
 records are removed. Later Hooks return without changing it or restarting checkpoints,
-including after a configuration change. A failed final check remains active and
-can recover on a later turn. SQLite reuses freed space; it does not run a full
-database compaction on every Hook.
+including after a configuration change. After the final checkpoint's recovery
+is exhausted, a later manual write can complete confirmation. SQLite reuses
+freed space; it does not run a full database compaction on every Hook.
 
 The Hook imports the current task's legacy JSON state on its first event, keeping
 its counters and emitted checkpoints. Old files remain untouched as rollback
 data, and SQLite is authoritative after import. No idle tasks are scanned.
-Older tasks already past the final checkpoint need one fresh confirmation;
-an old success flag does not establish that the final check completed. A suitable
-title can be submitted unchanged. Rolling back to the JSON-based version uses
-the old snapshot (new tasks restart counting); it does not undo written titles.
+Older tasks already past the final checkpoint need one fresh manual
+confirmation; an old success flag does not establish that the final check
+completed. A suitable title can be submitted unchanged. Rolling back to the
+JSON-based version uses the old snapshot (new tasks restart counting); it does
+not undo written titles.
 
 ## Route renamed tasks to sidebar sections
 

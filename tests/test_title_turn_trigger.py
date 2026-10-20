@@ -540,13 +540,75 @@ class TitleTurnTriggerTests(unittest.TestCase):
             run_hook(data_dir, post_tool_payload(4))
             self.assertEqual(json.loads(run_hook(data_dir, stop_payload(4, active=True))), {})
 
-    def test_interrupted_checkpoint_can_recover_on_next_user_turn(self) -> None:
+    def test_missing_or_failed_title_tool_recovers_once_per_checkpoint(self) -> None:
+        for checkpoints in ((2, 4, 10), (3, 6)):
+            for failed_write in (False, True):
+                with self.subTest(checkpoints=checkpoints, failed_write=failed_write):
+                    with tempfile.TemporaryDirectory() as data_dir:
+                        env = {CHECKPOINT_ENV: ",".join(map(str, checkpoints))}
+                        for number in range(1, checkpoints[-1] + 4):
+                            run_hook(data_dir, prompt_payload(number), env)
+                            if failed_write:
+                                failed = post_tool_payload(number)
+                                failed["tool_response"] = {"isError": True}
+                                run_hook(data_dir, failed, env)
+                            output = json.loads(run_hook(data_dir, stop_payload(number), env))
+                            if number in checkpoints:
+                                self.assertEqual(output["decision"], "block")
+                                # A recovery can have a new turn ID without a new prompt.
+                                resumed = number + 100
+                                continuation = json.loads(
+                                    run_hook(data_dir, stop_payload(resumed, active=True), env)
+                                )
+                                self.assertNotIn("decision", continuation)
+                                self.assertEqual(
+                                    json.loads(run_hook(data_dir, stop_payload(resumed), env)), {}
+                                )
+                                self.assertEqual(
+                                    json.loads(run_hook(data_dir, stop_payload(number), env)), {}
+                                )
+                            else:
+                                self.assertEqual(output, {})
+                        state = json.loads(state_text_for(data_dir))
+                        self.assertFalse(state["title_write_confirmed"])
+                        self.assertEqual(state["prompt_count"], checkpoints[-1] + 3)
+
+    def test_interrupted_checkpoint_waits_for_next_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
             for number in range(1, 4):
                 run_hook(data_dir, prompt_payload(number))
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(3)))["decision"], "block")
-            run_hook(data_dir, post_tool_payload(3))
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(3, active=True))), {})
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(3))), {})
+            run_hook(data_dir, prompt_payload(4))
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(4)))["decision"], "block")
+            run_hook(data_dir, post_tool_payload(4))
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(4, active=True))), {})
+
+    def test_manual_write_after_exhausted_recovery_still_confirms(self) -> None:
+        for checkpoint in (2, 10):
+            with self.subTest(checkpoint=checkpoint), tempfile.TemporaryDirectory() as data_dir:
+                for number in range(1, checkpoint + 1):
+                    run_hook(data_dir, prompt_payload(number))
+                self.assertEqual(
+                    json.loads(run_hook(data_dir, stop_payload(checkpoint)))["decision"], "block"
+                )
+                run_hook(data_dir, prompt_payload(checkpoint + 1))
+                self.assertEqual(json.loads(run_hook(data_dir, stop_payload(checkpoint + 1))), {})
+                run_hook(data_dir, post_tool_payload(checkpoint + 1))
+                self.assertEqual(json.loads(run_hook(data_dir, stop_payload(checkpoint + 1))), {})
+                if checkpoint == 10:
+                    self.assertEqual(state_row_for(data_dir), (1, None))
+                else:
+                    self.assertTrue(json.loads(state_text_for(data_dir))["title_write_confirmed"])
+
+    def test_stop_does_not_replay_newly_added_past_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as data_dir:
+            for number in range(1, 4):
+                run_hook(data_dir, prompt_payload(number))
+            env = {CHECKPOINT_ENV: "3,6"}
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(3), env)), {})
+            for number in range(4, 7):
+                run_hook(data_dir, prompt_payload(number), env)
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(6), env))["decision"], "block")
 
     def test_resumed_turn_success_allows_stop_without_new_user_prompt(self) -> None:
         for checkpoint in (2, 10):
@@ -647,9 +709,11 @@ class TitleTurnTriggerTests(unittest.TestCase):
                 }],
             }), encoding="utf-8")
             self.assertEqual(run_hook(data_dir, prompt_payload(31)), "")
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31)))["decision"], "block")
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31))), {})
+            self.assertFalse(json.loads(state_text_for(data_dir))["title_write_confirmed"])
             run_hook(data_dir, post_tool_payload(31))
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31, active=True))), {})
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31))), {})
+            self.assertEqual(state_row_for(data_dir), (1, None))
 
     def test_existing_v7_state_preserves_confirmation_without_pending_results(self) -> None:
         for confirmed in (False, True):
@@ -663,10 +727,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
                     "title_write_confirmed": confirmed,
                 }), encoding="utf-8")
                 output = json.loads(run_hook(data_dir, stop_payload(3)))
-                if confirmed:
-                    self.assertEqual(output, {})
-                else:
-                    self.assertEqual(output["decision"], "block")
+                self.assertEqual(output, {})
                 state = json.loads(state_text_for(data_dir))
                 self.assertEqual(state["prompt_count"], 3)
                 self.assertEqual(state["title_write_confirmed"], confirmed)
@@ -1277,7 +1338,7 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertEqual(state_row_for(data_dir), (1, None))
             self.assertEqual([path.name for path in Path(data_dir).iterdir()], ["title-state.sqlite3"])
 
-    def test_failed_final_check_remains_recoverable_in_next_turn(self) -> None:
+    def test_failed_final_check_waits_for_manual_write(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
             for number in range(1, 11):
                 run_hook(data_dir, prompt_payload(number))
@@ -1289,9 +1350,9 @@ class TitleTurnTriggerTests(unittest.TestCase):
             run_hook(data_dir, failed)
             self.assertNotIn("decision", json.loads(run_hook(data_dir, stop_payload(10, active=True))))
             run_hook(data_dir, prompt_payload(11))
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(11)))["decision"], "block")
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(11))), {})
             run_hook(data_dir, post_tool_payload(11))
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(11, active=True))), {})
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(11))), {})
             self.assertEqual(state_row_for(data_dir), (1, None))
 
     def test_delayed_receipt_cannot_satisfy_final_checkpoint(self) -> None:
@@ -1340,9 +1401,9 @@ class TitleTurnTriggerTests(unittest.TestCase):
             self.assertEqual(imported["fired_thresholds"], [2, 4, 10])
             self.assertFalse(imported["title_write_confirmed"])
             self.assertEqual(state_path_for(data_dir).read_text(encoding="utf-8"), legacy_text)
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31)))["decision"], "block")
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31))), {})
             run_hook(data_dir, post_tool_payload(31))
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31, active=True))), {})
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(31))), {})
             self.assertEqual(state_row_for(data_dir), (1, None))
             # An old installed Hook must not revive a session already in SQLite.
             state_path_for(data_dir).write_text("{}", encoding="utf-8")
@@ -1358,10 +1419,11 @@ class TitleTurnTriggerTests(unittest.TestCase):
                     self.assertEqual(json.loads(run_hook(data_dir, stop_payload(2))), {})
             shortened = {CHECKPOINT_ENV: "1,3"}
             self.assertEqual(run_hook(data_dir, prompt_payload(6), shortened), "")
-            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(6), shortened))["decision"], "block")
+            self.assertEqual(json.loads(run_hook(data_dir, stop_payload(6), shortened)), {})
+            self.assertFalse(json.loads(state_text_for(data_dir))["title_write_confirmed"])
             run_hook(data_dir, post_tool_payload(6), shortened)
             self.assertEqual(
-                json.loads(run_hook(data_dir, stop_payload(6, active=True), shortened)), {}
+                json.loads(run_hook(data_dir, stop_payload(6), shortened)), {}
             )
             self.assertEqual(state_row_for(data_dir), (1, None))
 

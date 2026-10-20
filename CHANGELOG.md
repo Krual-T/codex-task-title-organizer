@@ -6,7 +6,9 @@
   and ephemeral side-chat events before loading configuration or accessing state.
 - Verify current-task title writes from Codex App and TUI tools, including native,
   MCP, and flattened dynamic-tool names and JSON or MCP response envelopes.
-- Add at most one Stop recovery per turn when a required write is unconfirmed.
+- Add at most one Stop recovery per emitted checkpoint when a required write is
+  unconfirmed. Missing tools or failed recovery wait for a later checkpoint or
+  manual title write instead of prompting again on subsequent turns.
   A successful receipt lets the actual stopping turn finish, including resumed
   turns without a new user prompt. Recovery links directly to the installed skill.
 - Require a confirming write at the final checkpoint, even for an unchanged

@@ -1,5 +1,5 @@
 {
-  "description": "Request current-task title maintenance at prompt checkpoints 2, 4, and 10; verify title-tool receipts and recover a missed write once per turn at Stop.",
+  "description": "Request current-task title maintenance at prompt checkpoints 2, 4, and 10; verify title-tool receipts and recover a missed write once per checkpoint at Stop.",
   "hooks": {
     "UserPromptSubmit": [
       {

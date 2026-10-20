@@ -212,8 +212,10 @@ unless the user explicitly requests that broader scope.
 ## Recurring maintenance
 
 The plugin Hook covers the current active task at its checkpoints and provides
-a bounded Stop recovery when a title write remains unconfirmed. It does not scan
-idle old tasks; an old task can recover when the user resumes it.
+one automatic Stop recovery per checkpoint when a title write remains
+unconfirmed. If the tool is unavailable or recovery fails, finish normally and
+wait for a later checkpoint or an explicit manual request. Resuming a task does
+not renew an exhausted checkpoint's allowance. Idle old tasks are never scanned.
 
 When the user explicitly asks for recurring batch cleanup, prefer updating an
 existing automation instead of creating a duplicate. Preserve its schedule,

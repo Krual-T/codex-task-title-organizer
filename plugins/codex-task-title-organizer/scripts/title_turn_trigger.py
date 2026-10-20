@@ -798,6 +798,8 @@ def _handle_user_prompt(
         return None
 
     threshold = eligible[0]
+    # Only an emitted checkpoint grants another automatic recovery attempt.
+    state["stop_recovery_turn_token"] = None
     if threshold == checkpoints[-1]:
         state["title_write_confirmed"] = False
     fired.add(threshold)
@@ -928,17 +930,31 @@ def _handle_stop(
     state["title_tool_results"] = [
         record for record in results if record["turn_token"] != turn_token
     ]
-    if state["title_write_confirmed"] or state["prompt_count"] < checkpoints[0]:
+    checkpoint_records = (
+        state["pending_title_tool_completions"]
+        + state["title_tool_completion_observations"]
+    )
+    if (
+        state["title_write_confirmed"]
+        or state["prompt_count"] not in checkpoints
+        # Schedule changes mark past thresholds as fired without emitting them.
+        or not any(
+            record["checkpoint"] == state["prompt_count"]
+            for record in checkpoint_records
+        )
+    ):
         return None
     if payload.get("stop_hook_active") is True:
         if state["stop_recovery_turn_token"] == turn_token:
             return {
-                "systemMessage": "Title confirmation is incomplete; no further retry this turn."
+                "systemMessage": (
+                    "Title confirmation is incomplete; retry at a later checkpoint or manually."
+                )
             }
         return None
     if (
         payload.get("stop_hook_active") is not False
-        or state["stop_recovery_turn_token"] == turn_token
+        or state["stop_recovery_turn_token"] is not None
     ):
         return None
 
