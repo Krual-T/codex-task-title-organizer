@@ -4,7 +4,27 @@ The Hook defaults to checkpoints `2, 4, 10`:
 
 - `2`: establish a useful title early;
 - `4`: refine only when the title is missing, inaccurate, or materially clearer;
-- `10`: refresh only after a material change in project, work type, object, or purpose.
+- `10`: review and confirm the intended title, writing the same value if unchanged.
+
+The Stop Hook checks for an unconfirmed title write from the first configured
+checkpoint onward. It can request one recovery continuation per turn, including
+in an active task whose checkpoints have passed. A successful title receipt
+stops recovery until the final checkpoint, which requires its own receipt;
+intermediate refinements can still be skipped. Disabling the plugin's Hook
+configuration also disables Stop recovery.
+
+State lives in `PLUGIN_DATA/title-state.sqlite3`, with one row per hashed session
+ID. When Stop confirms a successful current-turn write at or after the last
+configured checkpoint, it replaces the detailed state with `done = 1` and
+`state_json = NULL`. Later events return without
+counting, writing state, or requesting another title check, even if the schedule
+changes. Deleting the completion marker would restart counting, so it is retained.
+Failed final writes keep their state for a later Stop recovery.
+
+Existing JSON state is imported once when that task next runs a Hook. Counters
+are preserved, but tasks already past the final checkpoint need one fresh
+confirmation. The legacy files remain unchanged for rollback; SQLite takes
+precedence after import. New tasks create no per-session JSON or lock files.
 
 ## Project-level configuration
 
@@ -54,9 +74,10 @@ Checkpoint values must be unique integers from 1 through 50. At most eight are
 accepted. The Hook sorts valid values. Invalid, oversized, or malformed config
 is ignored and the next valid source is used.
 
-Changing a schedule during an active task never replays newly added checkpoints
-whose prompt numbers already passed. Future checkpoints in the new schedule
-remain eligible.
+Changing a schedule during an unfinished task never replays newly added
+checkpoints whose prompt numbers already passed. Future checkpoints remain
+eligible. Shortening the schedule past its last checkpoint requires a fresh
+confirmation before retiring the state. Completed tasks stay completed.
 
 ## Sidebar routing
 
